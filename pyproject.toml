@@ -1,0 +1,21 @@
+[project]
+name = "sql-redis"
+version = "0.1.0"
+description = "SQL to Redis command translation utility"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "testcontainers[redis]>=4.0.0",
+    "redis>=5.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
