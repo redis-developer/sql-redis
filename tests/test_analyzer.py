@@ -23,6 +23,7 @@ def sample_schema() -> dict[str, dict[str, str]]:
         "vectors": {
             "id": "TEXT",
             "embedding": "VECTOR",
+            "category": "TAG",
         },
         "stores": {
             "name": "TEXT",
@@ -37,11 +38,11 @@ class TestAnalyzerFieldTypeResolution:
     def test_resolve_text_field(self, sample_schema):
         """Analyzer identifies TEXT fields."""
         parser = SQLParser()
-        parsed = parser.parse("SELECT title FROM products WHERE MATCH(title, 'laptop')")
-        
+        parsed = parser.parse("SELECT title FROM products WHERE fulltext(title, 'laptop')")
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         assert result.get_field_type("title") == "TEXT"
 
     def test_resolve_numeric_field(self, sample_schema):
@@ -68,19 +69,19 @@ class TestAnalyzerFieldTypeResolution:
         """Analyzer identifies VECTOR fields."""
         parser = SQLParser()
         parsed = parser.parse(
-            "SELECT id, vector_distance(embedding, $vector) AS sim FROM vectors"
+            "SELECT id, vector_distance(embedding, :vector) AS sim FROM vectors"
         )
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         assert result.get_field_type("embedding") == "VECTOR"
 
     def test_resolve_geo_field(self, sample_schema):
         """Analyzer identifies GEO fields."""
         parser = SQLParser()
         parsed = parser.parse(
-            "SELECT name FROM stores WHERE DISTANCE(location, POINT(-122, 37)) < 10"
+            "SELECT name FROM stores WHERE geo_distance(location, POINT(-122, 37)) < 10"
         )
         
         analyzer = Analyzer(sample_schema)
@@ -115,11 +116,11 @@ class TestAnalyzerConditionClassification:
     def test_classify_text_condition(self, sample_schema):
         """Conditions on TEXT fields are classified correctly."""
         parser = SQLParser()
-        parsed = parser.parse("SELECT * FROM products WHERE MATCH(title, 'laptop')")
-        
+        parsed = parser.parse("SELECT * FROM products WHERE fulltext(title, 'laptop')")
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         text_conditions = result.get_conditions_by_type("TEXT")
         assert len(text_conditions) == 1
         assert text_conditions[0].field == "title"
@@ -153,7 +154,7 @@ class TestAnalyzerConditionClassification:
         parser = SQLParser()
         parsed = parser.parse(
             "SELECT * FROM products "
-            "WHERE MATCH(title, 'laptop') AND price < 1000 AND category = 'electronics'"
+            "WHERE fulltext(title, 'laptop') AND price < 1000 AND category = 'electronics'"
         )
 
         analyzer = Analyzer(sample_schema)
@@ -257,7 +258,7 @@ class TestAnalyzerVectorSearch:
         """Analyzer detects KNN vector search."""
         parser = SQLParser()
         parsed = parser.parse(
-            "SELECT id, vector_distance(embedding, $vector) AS sim "
+            "SELECT id, vector_distance(embedding, :vector) AS sim "
             "FROM vectors ORDER BY sim ASC LIMIT 5"
         )
 
@@ -273,7 +274,7 @@ class TestAnalyzerVectorSearch:
         """Analyzer detects hybrid (filter + vector) search."""
         parser = SQLParser()
         parsed = parser.parse(
-            "SELECT id, vector_distance(embedding, $vector) AS score "
+            "SELECT id, vector_distance(embedding, :vector) AS score "
             "FROM vectors WHERE category = 'electronics' "
             "ORDER BY score ASC LIMIT 5"
         )

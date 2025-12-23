@@ -18,4 +18,15 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=sql_redis --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["sql_redis"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+]
 

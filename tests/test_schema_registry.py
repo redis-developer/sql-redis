@@ -6,13 +6,12 @@ import redis
 from sql_redis.schema import SchemaRegistry
 
 
-@pytest.fixture(scope="module")
-def multi_index_setup(redis_client: redis.Redis):
-    """Create multiple indexes for schema registry testing."""
+def _create_test_indexes(redis_client: redis.Redis) -> list[str]:
+    """Helper to create test indexes."""
     # Clean up any existing indexes
     for index_name in redis_client.execute_command("FT._LIST"):
         redis_client.execute_command("FT.DROPINDEX", index_name, "DD")
-    
+
     # Create products index
     redis_client.execute_command(
         "FT.CREATE", "products",
@@ -23,7 +22,7 @@ def multi_index_setup(redis_client: redis.Redis):
         "price", "NUMERIC", "SORTABLE",
         "category", "TAG",
     )
-    
+
     # Create users index
     redis_client.execute_command(
         "FT.CREATE", "users",
@@ -34,7 +33,7 @@ def multi_index_setup(redis_client: redis.Redis):
         "email", "TAG",
         "age", "NUMERIC",
     )
-    
+
     # Create stores index with GEO field
     redis_client.execute_command(
         "FT.CREATE", "stores",
@@ -44,7 +43,7 @@ def multi_index_setup(redis_client: redis.Redis):
         "name", "TEXT",
         "location", "GEO",
     )
-    
+
     # Create vectors index with VECTOR field
     redis_client.execute_command(
         "FT.CREATE", "vectors",
@@ -55,8 +54,23 @@ def multi_index_setup(redis_client: redis.Redis):
         "embedding", "VECTOR", "FLAT", "6",
         "TYPE", "FLOAT32", "DIM", "128", "DISTANCE_METRIC", "COSINE",
     )
-    
-    yield ["products", "users", "stores", "vectors"]
+
+    return ["products", "users", "stores", "vectors"]
+
+
+@pytest.fixture(scope="module")
+def multi_index_setup(redis_client: redis.Redis):
+    """Create multiple indexes for schema registry testing (module-scoped)."""
+    return _create_test_indexes(redis_client)
+
+
+@pytest.fixture
+def multi_index_setup_fresh(redis_client: redis.Redis):
+    """Create multiple indexes for schema registry testing (function-scoped).
+
+    Use this fixture for tests that modify or delete indexes.
+    """
+    return _create_test_indexes(redis_client)
 
 
 class TestSchemaRegistryLoadAll:
@@ -170,11 +184,42 @@ class TestSchemaRegistryEmptyServer:
         assert registry.get_schema("anything") == {}
 
 
+class TestSchemaRegistryParsing:
+    """Tests for schema parsing edge cases."""
+
+    def test_parse_schema_no_attributes_section(self, redis_client: redis.Redis):
+        """_parse_schema_from_info handles response without attributes."""
+        registry = SchemaRegistry(redis_client)
+
+        # FT.INFO response without 'attributes' key
+        fake_info = ["index_name", "test", "other_key", "value"]
+        schema = registry._parse_schema_from_info(fake_info)
+
+        assert schema == {}
+
+    def test_parse_schema_incomplete_attribute(self, redis_client: redis.Redis):
+        """_parse_schema_from_info handles attribute without type."""
+        registry = SchemaRegistry(redis_client)
+
+        # FT.INFO response with attribute but missing type
+        fake_info = [
+            "attributes",
+            [
+                ["identifier", "field1", "attribute", "field1"],  # No type
+                ["identifier", "field2", "attribute", "field2", "type", "TEXT"],
+            ],
+        ]
+        schema = registry._parse_schema_from_info(fake_info)
+
+        # Only field2 should be captured (field1 has no type)
+        assert schema == {"field2": "TEXT"}
+
+
 class TestSchemaRegistryRefresh:
     """Tests for schema refresh functionality."""
 
     def test_refresh_updates_single_index(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """refresh() should update schema for a single index."""
         registry = SchemaRegistry(redis_client)
@@ -205,7 +250,7 @@ class TestSchemaRegistryRefresh:
         assert "price" not in products
 
     def test_refresh_handles_deleted_index(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """refresh() should handle when an index no longer exists."""
         registry = SchemaRegistry(redis_client)
@@ -220,7 +265,7 @@ class TestSchemaRegistryRefresh:
         assert registry.get_schema("products") == {}
 
     def test_refresh_handles_new_index(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """refresh() should handle a newly created index."""
         registry = SchemaRegistry(redis_client)
@@ -241,11 +286,164 @@ class TestSchemaRegistryRefresh:
         assert registry.get_schema("new_index") == {"field1": "TEXT"}
 
 
+class TestSchemaRegistryProcessEvents:
+    """Tests for process_pending_events()."""
+
+    def test_process_pending_events_when_not_watching(
+        self, redis_client: redis.Redis, multi_index_setup: list[str]
+    ):
+        """process_pending_events() should do nothing when not watching."""
+        registry = SchemaRegistry(redis_client)
+        registry.load_all()
+
+        # Should return early without error
+        registry.process_pending_events()
+
+    def test_process_pending_events_no_changes(
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
+    ):
+        """process_pending_events() with no index changes."""
+        registry = SchemaRegistry(redis_client)
+        registry.load_all()
+
+        callbacks_received = []
+
+        def on_schema_change(event_type: str, index_name: str):
+            callbacks_received.append((event_type, index_name))
+
+        registry.start_watching(on_change=on_schema_change)
+
+        try:
+            # Process events with no changes
+            registry.process_pending_events()
+
+            # Should have no callbacks
+            assert len(callbacks_received) == 0
+        finally:
+            registry.stop_watching()
+
+    def test_process_pending_events_multiple_new_indexes(
+        self, redis_client: redis.Redis
+    ):
+        """process_pending_events() detecting multiple new indexes at once."""
+        # Start with clean state
+        for index_name in redis_client.execute_command("FT._LIST"):
+            redis_client.execute_command("FT.DROPINDEX", index_name, "DD")
+
+        registry = SchemaRegistry(redis_client)
+        registry.load_all()  # Empty
+
+        callbacks_received = []
+
+        def on_schema_change(event_type: str, index_name: str):
+            callbacks_received.append((event_type, index_name))
+
+        registry.start_watching(on_change=on_schema_change)
+
+        try:
+            # Create multiple indexes before processing
+            redis_client.execute_command(
+                "FT.CREATE", "idx1", "ON", "HASH", "PREFIX", "1", "idx1:",
+                "SCHEMA", "f1", "TEXT"
+            )
+            redis_client.execute_command(
+                "FT.CREATE", "idx2", "ON", "HASH", "PREFIX", "1", "idx2:",
+                "SCHEMA", "f2", "TEXT"
+            )
+
+            # Process should detect both
+            registry.process_pending_events()
+
+            assert len(callbacks_received) == 2
+            created_indexes = {idx for _, idx in callbacks_received}
+            assert created_indexes == {"idx1", "idx2"}
+        finally:
+            registry.stop_watching()
+
+    def test_process_pending_events_without_callback(
+        self, redis_client: redis.Redis
+    ):
+        """process_pending_events() without on_change callback."""
+        # Start with clean state
+        for index_name in redis_client.execute_command("FT._LIST"):
+            redis_client.execute_command("FT.DROPINDEX", index_name, "DD")
+
+        registry = SchemaRegistry(redis_client)
+        registry.load_all()  # Empty
+
+        # Start watching without callback
+        registry.start_watching()
+
+        try:
+            # Create an index
+            redis_client.execute_command(
+                "FT.CREATE", "nocb", "ON", "HASH", "PREFIX", "1", "nocb:",
+                "SCHEMA", "f1", "TEXT"
+            )
+
+            # Process should detect and load without error
+            registry.process_pending_events()
+
+            # Schema should be loaded
+            assert registry.get_schema("nocb") == {"f1": "TEXT"}
+
+            # Now delete it
+            redis_client.execute_command("FT.DROPINDEX", "nocb", "DD")
+            registry.process_pending_events()
+
+            # Schema should be removed
+            assert registry.get_schema("nocb") == {}
+        finally:
+            registry.stop_watching()
+
+    def test_process_pending_events_multiple_deleted_indexes(
+        self, redis_client: redis.Redis
+    ):
+        """process_pending_events() detecting multiple deleted indexes at once."""
+        # Start with clean state
+        for index_name in redis_client.execute_command("FT._LIST"):
+            redis_client.execute_command("FT.DROPINDEX", index_name, "DD")
+
+        # Create indexes to delete
+        redis_client.execute_command(
+            "FT.CREATE", "del1", "ON", "HASH", "PREFIX", "1", "del1:",
+            "SCHEMA", "f1", "TEXT"
+        )
+        redis_client.execute_command(
+            "FT.CREATE", "del2", "ON", "HASH", "PREFIX", "1", "del2:",
+            "SCHEMA", "f2", "TEXT"
+        )
+
+        registry = SchemaRegistry(redis_client)
+        registry.load_all()
+
+        callbacks_received = []
+
+        def on_schema_change(event_type: str, index_name: str):
+            callbacks_received.append((event_type, index_name))
+
+        registry.start_watching(on_change=on_schema_change)
+
+        try:
+            # Delete both indexes
+            redis_client.execute_command("FT.DROPINDEX", "del1", "DD")
+            redis_client.execute_command("FT.DROPINDEX", "del2", "DD")
+
+            # Process should detect both deletions
+            registry.process_pending_events()
+
+            assert len(callbacks_received) == 2
+            deleted_indexes = {idx for _, idx in callbacks_received}
+            assert deleted_indexes == {"del1", "del2"}
+        finally:
+            registry.stop_watching()
+
+
 class TestSchemaRegistryWatching:
     """Tests for keyspace notification watching."""
 
     def test_start_watching_detects_new_index(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """start_watching() should detect when new indexes are created."""
         registry = SchemaRegistry(redis_client)
@@ -286,7 +484,7 @@ class TestSchemaRegistryWatching:
             registry.stop_watching()
 
     def test_start_watching_detects_dropped_index(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """start_watching() should detect when indexes are dropped."""
         registry = SchemaRegistry(redis_client)
@@ -317,7 +515,7 @@ class TestSchemaRegistryWatching:
             registry.stop_watching()
 
     def test_stop_watching_stops_notifications(
-        self, redis_client: redis.Redis, multi_index_setup: list[str]
+        self, redis_client: redis.Redis, multi_index_setup_fresh: list[str]
     ):
         """stop_watching() should stop receiving notifications."""
         registry = SchemaRegistry(redis_client)

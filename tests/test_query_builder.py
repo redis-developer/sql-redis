@@ -140,8 +140,14 @@ class TestQueryBuilderNumericFields:
         """NUMERIC field with !=: -@field:[val val]."""
         builder = QueryBuilder()
         result = builder.build_numeric_condition("price", "!=", 100)
-        
+
         assert result == "-@price:[100 100]"
+
+    def test_numeric_unknown_operator(self):
+        """NUMERIC field with unknown operator raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Unknown numeric operator"):
+            builder.build_numeric_condition("price", "LIKE", 100)
 
 
 class TestQueryBuilderVectorFields:
@@ -197,7 +203,25 @@ class TestQueryBuilderGeoFields:
         )
 
         # geodistance returns meters, divide by 1609.34 for miles
-        assert "1609.34" in result or "mi" in result
+        assert "1609.34" in result
+
+    def test_geo_distance_in_km(self):
+        """GEO field distance converted to kilometers."""
+        builder = QueryBuilder()
+        result = builder.build_geo_distance_apply(
+            "location", lon=-122.4, lat=37.8, alias="km_dist", unit="km"
+        )
+
+        assert "/1000" in result
+
+    def test_geo_distance_in_feet(self):
+        """GEO field distance converted to feet."""
+        builder = QueryBuilder()
+        result = builder.build_geo_distance_apply(
+            "location", lon=-122.4, lat=37.8, alias="ft_dist", unit="ft"
+        )
+
+        assert "*3.28084" in result
 
 
 class TestQueryBuilderBooleanCombinations:
