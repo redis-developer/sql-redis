@@ -3,13 +3,16 @@ name = "sql-redis"
 version = "0.1.0"
 description = "SQL to Redis command translation utility"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "redis>=5.0.0",
+    "sqlglot>=26.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
     "testcontainers[redis]>=4.0.0",
-    "redis>=5.0.0",
 ]
 
 [build-system]
