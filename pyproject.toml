@@ -2,7 +2,7 @@
 name = "sql-redis"
 version = "0.1.0"
 description = "SQL to Redis command translation utility"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "redis>=5.0.0",
     "sqlglot>=26.0.0",

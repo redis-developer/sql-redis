@@ -1,9 +1,11 @@
 """SQL to Redis command translator."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
-from sql_redis.parser import SQLParser, ParsedQuery, Condition
-from sql_redis.analyzer import Analyzer, AnalyzedQuery
+from sql_redis.analyzer import AnalyzedQuery, Analyzer
+from sql_redis.parser import Condition, ParsedQuery, SQLParser
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import SchemaRegistry
 
@@ -139,7 +141,11 @@ class Translator:
             )
         elif field_type == "TAG":
             # Keep list value for IN clauses, convert scalar to string
-            value = condition.value if isinstance(condition.value, list) else str(condition.value)
+            value = (
+                condition.value
+                if isinstance(condition.value, list)
+                else str(condition.value)
+            )
             return self._query_builder.build_tag_condition(
                 condition.field,
                 operator,
