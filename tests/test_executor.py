@@ -38,27 +38,61 @@ def products_index(redis_client: redis.Redis) -> str:
         pass
 
     redis_client.execute_command(
-        "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "product:",
+        "FT.CREATE",
+        index_name,
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "product:",
         "SCHEMA",
-        "title", "TEXT",
-        "category", "TAG",
-        "price", "NUMERIC",
-        "stock", "NUMERIC",
+        "title",
+        "TEXT",
+        "category",
+        "TAG",
+        "price",
+        "NUMERIC",
+        "stock",
+        "NUMERIC",
     )
 
     # Add test data
-    redis_client.hset("product:1", mapping={
-        "title": "Laptop Pro", "category": "electronics", "price": "999.99", "stock": "10"
-    })
-    redis_client.hset("product:2", mapping={
-        "title": "Wireless Mouse", "category": "electronics", "price": "29.99", "stock": "50"
-    })
-    redis_client.hset("product:3", mapping={
-        "title": "Python Book", "category": "books", "price": "49.99", "stock": "25"
-    })
-    redis_client.hset("product:4", mapping={
-        "title": "Redis Guide", "category": "books", "price": "39.99", "stock": "15"
-    })
+    redis_client.hset(
+        "product:1",
+        mapping={
+            "title": "Laptop Pro",
+            "category": "electronics",
+            "price": "999.99",
+            "stock": "10",
+        },
+    )
+    redis_client.hset(
+        "product:2",
+        mapping={
+            "title": "Wireless Mouse",
+            "category": "electronics",
+            "price": "29.99",
+            "stock": "50",
+        },
+    )
+    redis_client.hset(
+        "product:3",
+        mapping={
+            "title": "Python Book",
+            "category": "books",
+            "price": "49.99",
+            "stock": "25",
+        },
+    )
+    redis_client.hset(
+        "product:4",
+        mapping={
+            "title": "Redis Guide",
+            "category": "books",
+            "price": "39.99",
+            "stock": "15",
+        },
+    )
 
     return index_name
 
@@ -112,9 +146,7 @@ class TestBasicExecute:
 
     def test_select_with_numeric_filter(self, executor: Executor, products_index: str):
         """SELECT with numeric comparison."""
-        result = executor.execute(
-            f"SELECT * FROM {products_index} WHERE price < 50"
-        )
+        result = executor.execute(f"SELECT * FROM {products_index} WHERE price < 50")
         assert result.count >= 2
         for row in result.rows:
             assert float(row["price"]) < 50
@@ -135,9 +167,7 @@ class TestBasicExecute:
 
     def test_select_with_order_by(self, executor: Executor, products_index: str):
         """SELECT with ORDER BY."""
-        result = executor.execute(
-            f"SELECT * FROM {products_index} ORDER BY price DESC"
-        )
+        result = executor.execute(f"SELECT * FROM {products_index} ORDER BY price DESC")
         prices = [float(row["price"]) for row in result.rows]
         assert prices == sorted(prices, reverse=True)
 
@@ -165,9 +195,7 @@ class TestAggregateExecute:
 
     def test_sum_aggregation(self, executor: Executor, products_index: str):
         """SELECT SUM(field) returns sum."""
-        result = executor.execute(
-            f"SELECT SUM(price) AS total FROM {products_index}"
-        )
+        result = executor.execute(f"SELECT SUM(price) AS total FROM {products_index}")
         assert len(result.rows) == 1
         total = float(result.rows[0]["total"])
         expected = 999.99 + 29.99 + 49.99 + 39.99
@@ -181,7 +209,7 @@ class TestExecuteWithParams:
         """Execute with numeric parameter."""
         result = executor.execute(
             f"SELECT * FROM {products_index} WHERE price > :min_price",
-            params={"min_price": 40}
+            params={"min_price": 40},
         )
         for row in result.rows:
             assert float(row["price"]) > 40
@@ -190,7 +218,7 @@ class TestExecuteWithParams:
         """Execute with string parameter."""
         result = executor.execute(
             f"SELECT * FROM {products_index} WHERE category = :cat",
-            params={"cat": "books"}
+            params={"cat": "books"},
         )
         assert len(result.rows) == 2
         for row in result.rows:
@@ -210,11 +238,26 @@ class TestVectorSearch:
             pass
 
         redis_client.execute_command(
-            "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "vec:",
+            "FT.CREATE",
+            index_name,
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "vec:",
             "SCHEMA",
-            "title", "TEXT",
-            "embedding", "VECTOR", "HNSW", "6",
-            "TYPE", "FLOAT32", "DIM", "4", "DISTANCE_METRIC", "COSINE",
+            "title",
+            "TEXT",
+            "embedding",
+            "VECTOR",
+            "HNSW",
+            "6",
+            "TYPE",
+            "FLOAT32",
+            "DIM",
+            "4",
+            "DISTANCE_METRIC",
+            "COSINE",
         )
 
         def to_bytes(v):
@@ -226,9 +269,18 @@ class TestVectorSearch:
             port=redis_client.connection_pool.connection_kwargs["port"],
             decode_responses=False,
         )
-        raw_client.hset("vec:1", mapping={"title": "First", "embedding": to_bytes([0.1, 0.2, 0.3, 0.4])})
-        raw_client.hset("vec:2", mapping={"title": "Second", "embedding": to_bytes([0.5, 0.6, 0.7, 0.8])})
-        raw_client.hset("vec:3", mapping={"title": "Third", "embedding": to_bytes([0.9, 0.8, 0.7, 0.6])})
+        raw_client.hset(
+            "vec:1",
+            mapping={"title": "First", "embedding": to_bytes([0.1, 0.2, 0.3, 0.4])},
+        )
+        raw_client.hset(
+            "vec:2",
+            mapping={"title": "Second", "embedding": to_bytes([0.5, 0.6, 0.7, 0.8])},
+        )
+        raw_client.hset(
+            "vec:3",
+            mapping={"title": "Third", "embedding": to_bytes([0.9, 0.8, 0.7, 0.6])},
+        )
 
         return index_name
 
@@ -244,7 +296,7 @@ class TestVectorSearch:
         result = executor.execute(
             f"SELECT title, vector_distance(embedding, :vec) AS score "
             f"FROM {vector_index} LIMIT 3",
-            params={"vec": query_vector}
+            params={"vec": query_vector},
         )
         assert len(result.rows) <= 3
         # First result should be closest to query vector
@@ -263,4 +315,3 @@ class TestErrorHandling:
         """Unknown index raises exception."""
         with pytest.raises(Exception):
             executor.execute("SELECT * FROM nonexistent_index")
-

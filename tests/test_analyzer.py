@@ -2,7 +2,7 @@
 
 import pytest
 
-from sql_redis.analyzer import Analyzer, AnalyzedQuery
+from sql_redis.analyzer import AnalyzedQuery, Analyzer
 from sql_redis.parser import SQLParser
 
 
@@ -38,7 +38,9 @@ class TestAnalyzerFieldTypeResolution:
     def test_resolve_text_field(self, sample_schema):
         """Analyzer identifies TEXT fields."""
         parser = SQLParser()
-        parsed = parser.parse("SELECT title FROM products WHERE fulltext(title, 'laptop')")
+        parsed = parser.parse(
+            "SELECT title FROM products WHERE fulltext(title, 'laptop')"
+        )
 
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
@@ -49,20 +51,20 @@ class TestAnalyzerFieldTypeResolution:
         """Analyzer identifies NUMERIC fields."""
         parser = SQLParser()
         parsed = parser.parse("SELECT * FROM products WHERE price > 100")
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         assert result.get_field_type("price") == "NUMERIC"
 
     def test_resolve_tag_field(self, sample_schema):
         """Analyzer identifies TAG fields."""
         parser = SQLParser()
         parsed = parser.parse("SELECT * FROM products WHERE category = 'electronics'")
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         assert result.get_field_type("category") == "TAG"
 
     def test_resolve_vector_field(self, sample_schema):
@@ -83,19 +85,19 @@ class TestAnalyzerFieldTypeResolution:
         parsed = parser.parse(
             "SELECT name FROM stores WHERE geo_distance(location, POINT(-122, 37)) < 10"
         )
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         assert result.get_field_type("location") == "GEO"
 
     def test_unknown_field_raises_error(self, sample_schema):
         """Analyzer raises error for unknown fields."""
         parser = SQLParser()
         parsed = parser.parse("SELECT unknown_field FROM products")
-        
+
         analyzer = Analyzer(sample_schema)
-        
+
         with pytest.raises(ValueError, match="Unknown field"):
             analyzer.analyze(parsed)
 
@@ -103,9 +105,9 @@ class TestAnalyzerFieldTypeResolution:
         """Analyzer raises error for unknown index."""
         parser = SQLParser()
         parsed = parser.parse("SELECT * FROM unknown_index")
-        
+
         analyzer = Analyzer(sample_schema)
-        
+
         with pytest.raises(ValueError, match="Unknown index"):
             analyzer.analyze(parsed)
 
@@ -129,10 +131,10 @@ class TestAnalyzerConditionClassification:
         """Conditions on NUMERIC fields are classified correctly."""
         parser = SQLParser()
         parsed = parser.parse("SELECT * FROM products WHERE price > 100 AND stock > 0")
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         numeric_conditions = result.get_conditions_by_type("NUMERIC")
         assert len(numeric_conditions) == 2
 
@@ -142,10 +144,10 @@ class TestAnalyzerConditionClassification:
         parsed = parser.parse(
             "SELECT * FROM products WHERE category = 'books' AND tags IN ('sale')"
         )
-        
+
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
-        
+
         tag_conditions = result.get_conditions_by_type("TAG")
         assert len(tag_conditions) == 2
 
@@ -228,9 +230,7 @@ class TestAnalyzerComputedFields:
     def test_extract_computed_expression(self, sample_schema):
         """Analyzer extracts computed field expressions."""
         parser = SQLParser()
-        parsed = parser.parse(
-            "SELECT price, (price * 0.9) AS discounted FROM products"
-        )
+        parsed = parser.parse("SELECT price, (price * 0.9) AS discounted FROM products")
 
         analyzer = Analyzer(sample_schema)
         result = analyzer.analyze(parsed)
@@ -284,4 +284,3 @@ class TestAnalyzerVectorSearch:
 
         assert result.vector_search is not None
         assert result.has_prefilter is True
-

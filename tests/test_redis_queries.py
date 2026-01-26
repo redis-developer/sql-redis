@@ -19,12 +19,22 @@ class TestTextSearchQuery:
     ):
         """Validate FT.AGGREGATE with text match and numeric filter."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@title:laptop @price:[0 (1000]",
-            "LOAD", "2", "@title", "@price",
-            "SORTBY", "2", "@price", "ASC",
-            "LIMIT", "0", "10",
-            "DIALECT", "2"
+            "LOAD",
+            "2",
+            "@title",
+            "@price",
+            "SORTBY",
+            "2",
+            "@price",
+            "ASC",
+            "LIMIT",
+            "0",
+            "10",
+            "DIALECT",
+            "2",
         )
         # First element is count, rest are results
         assert len(result) > 1, "Should return at least one laptop under $1000"
@@ -40,20 +50,30 @@ class TestTextSearchQuery:
 class TestVectorKNNSearch:
     """Test 2: Vector KNN Search."""
 
-    def test_vector_distance_with_knn(
-        self, redis_client: redis.Redis, vec_data: str
-    ):
+    def test_vector_distance_with_knn(self, redis_client: redis.Redis, vec_data: str):
         """Validate FT.AGGREGATE with KNN vector search."""
         query_vector = float_vector_to_bytes([0.1, 0.2, 0.3, 0.4])
-        
+
         result = redis_client.execute_command(
-            "FT.AGGREGATE", vec_data,
+            "FT.AGGREGATE",
+            vec_data,
             "*=>[KNN 5 @embedding $BLOB AS similarity]",
-            "LOAD", "1", "@id",
-            "SORTBY", "2", "@similarity", "ASC",
-            "LIMIT", "0", "5",
-            "PARAMS", "2", "BLOB", query_vector,
-            "DIALECT", "2"
+            "LOAD",
+            "1",
+            "@id",
+            "SORTBY",
+            "2",
+            "@similarity",
+            "ASC",
+            "LIMIT",
+            "0",
+            "5",
+            "PARAMS",
+            "2",
+            "BLOB",
+            query_vector,
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return vector search results"
 
@@ -61,20 +81,30 @@ class TestVectorKNNSearch:
 class TestHybridSearch:
     """Test 3: Hybrid Search (Text + Vector)."""
 
-    def test_text_and_vector_combined(
-        self, redis_client: redis.Redis, items_data: str
-    ):
+    def test_text_and_vector_combined(self, redis_client: redis.Redis, items_data: str):
         """Validate FT.AGGREGATE with hybrid text+vector search."""
         query_vector = float_vector_to_bytes([0.1, 0.2, 0.3, 0.4])
-        
+
         result = redis_client.execute_command(
-            "FT.AGGREGATE", items_data,
+            "FT.AGGREGATE",
+            items_data,
             "(@category:{electronics} @description:smartphone)=>[KNN 5 @embedding $BLOB AS score]",
-            "LOAD", "1", "@name",
-            "SORTBY", "2", "@score", "ASC",
-            "LIMIT", "0", "5",
-            "PARAMS", "2", "BLOB", query_vector,
-            "DIALECT", "2"
+            "LOAD",
+            "1",
+            "@name",
+            "SORTBY",
+            "2",
+            "@score",
+            "ASC",
+            "LIMIT",
+            "0",
+            "5",
+            "PARAMS",
+            "2",
+            "BLOB",
+            query_vector,
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return hybrid search results"
 
@@ -82,18 +112,28 @@ class TestHybridSearch:
 class TestGroupByWithCount:
     """Test 4: GROUP BY with COUNT."""
 
-    def test_count_with_filter(
-        self, redis_client: redis.Redis, products_data: str
-    ):
+    def test_count_with_filter(self, redis_client: redis.Redis, products_data: str):
         """Validate FT.AGGREGATE with GROUPBY, REDUCE COUNT, and FILTER."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@price:[50 +inf]",
-            "GROUPBY", "1", "@category",
-            "REDUCE", "COUNT", "0", "AS", "count",
-            "FILTER", "@count > 0",
-            "SORTBY", "2", "@count", "DESC",
-            "DIALECT", "2"
+            "GROUPBY",
+            "1",
+            "@category",
+            "REDUCE",
+            "COUNT",
+            "0",
+            "AS",
+            "count",
+            "FILTER",
+            "@count > 0",
+            "SORTBY",
+            "2",
+            "@count",
+            "DESC",
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return grouped results"
 
@@ -106,14 +146,38 @@ class TestMultipleAggregations:
     ):
         """Validate FT.AGGREGATE with multiple REDUCE operations."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data, "*",
-            "GROUPBY", "1", "@category",
-            "REDUCE", "COUNT", "0", "AS", "product_count",
-            "REDUCE", "SUM", "1", "@price", "AS", "total_price",
-            "REDUCE", "AVG", "1", "@rating", "AS", "avg_rating",
-            "SORTBY", "2", "@total_price", "DESC",
-            "LIMIT", "0", "10",
-            "DIALECT", "2"
+            "FT.AGGREGATE",
+            products_data,
+            "*",
+            "GROUPBY",
+            "1",
+            "@category",
+            "REDUCE",
+            "COUNT",
+            "0",
+            "AS",
+            "product_count",
+            "REDUCE",
+            "SUM",
+            "1",
+            "@price",
+            "AS",
+            "total_price",
+            "REDUCE",
+            "AVG",
+            "1",
+            "@rating",
+            "AS",
+            "avg_rating",
+            "SORTBY",
+            "2",
+            "@total_price",
+            "DESC",
+            "LIMIT",
+            "0",
+            "10",
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return aggregated results"
         # Verify we have the expected fields
@@ -131,12 +195,24 @@ class TestGlobalAggregation:
     ):
         """Validate FT.AGGREGATE with GROUPBY 0 for global aggregation."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@price:[(100 +inf]",
-            "GROUPBY", "0",
-            "REDUCE", "COUNT", "0", "AS", "total_count",
-            "REDUCE", "AVG", "1", "@price", "AS", "avg_price",
-            "DIALECT", "2"
+            "GROUPBY",
+            "0",
+            "REDUCE",
+            "COUNT",
+            "0",
+            "AS",
+            "total_count",
+            "REDUCE",
+            "AVG",
+            "1",
+            "@price",
+            "AS",
+            "avg_price",
+            "DIALECT",
+            "2",
         )
         assert len(result) == 2, "Should return single aggregation row"
         row = dict(zip(result[1][::2], result[1][1::2]))
@@ -152,12 +228,22 @@ class TestApplyWithComputedFields:
     ):
         """Validate FT.AGGREGATE with APPLY for computed fields."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@price:[(100 +inf]",
-            "LOAD", "1", "@price",
-            "APPLY", "@price * 0.9", "AS", "discounted_price",
-            "SORTBY", "2", "@discounted_price", "DESC",
-            "DIALECT", "2"
+            "LOAD",
+            "1",
+            "@price",
+            "APPLY",
+            "@price * 0.9",
+            "AS",
+            "discounted_price",
+            "SORTBY",
+            "2",
+            "@discounted_price",
+            "DESC",
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return results with computed field"
         # Verify computed field exists and is 90% of price
@@ -177,10 +263,15 @@ class TestRangeQueryWithBetween:
     ):
         """Validate FT.AGGREGATE with numeric range filters."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@price:[100 500] @stock:[1 +inf]",
-            "LOAD", "2", "@title", "@price",
-            "DIALECT", "2"
+            "LOAD",
+            "2",
+            "@title",
+            "@price",
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return products in price range"
         # Verify all prices are in range
@@ -188,21 +279,25 @@ class TestRangeQueryWithBetween:
             row_dict = dict(zip(row[::2], row[1::2]))
             if "price" in row_dict:
                 price = float(row_dict["price"])
-                assert 100 <= price <= 500, f"Price {price} should be between 100 and 500"
+                assert (
+                    100 <= price <= 500
+                ), f"Price {price} should be between 100 and 500"
 
 
 class TestTagFieldMultiValueSearch:
     """Test 9: Tag Field Multi-Value Search."""
 
-    def test_in_clause_with_or(
-        self, redis_client: redis.Redis, products_data: str
-    ):
+    def test_in_clause_with_or(self, redis_client: redis.Redis, products_data: str):
         """Validate FT.AGGREGATE with TAG field OR conditions."""
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "(@tags:{sale|featured} | @category:{electronics})",
-            "LOAD", "1", "@name",
-            "DIALECT", "2"
+            "LOAD",
+            "1",
+            "@name",
+            "DIALECT",
+            "2",
         )
         assert len(result) > 1, "Should return products matching tag OR conditions"
 
@@ -210,27 +305,43 @@ class TestTagFieldMultiValueSearch:
 class TestPaginationWithOffset:
     """Test 10: Pagination with OFFSET."""
 
-    def test_limit_with_offset(
-        self, redis_client: redis.Redis, products_data: str
-    ):
+    def test_limit_with_offset(self, redis_client: redis.Redis, products_data: str):
         """Validate FT.AGGREGATE with LIMIT offset count."""
         # First get all books
         all_books = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@category:{books}",
-            "LOAD", "2", "@title", "@price",
-            "SORTBY", "2", "@price", "DESC",
-            "DIALECT", "2"
+            "LOAD",
+            "2",
+            "@title",
+            "@price",
+            "SORTBY",
+            "2",
+            "@price",
+            "DESC",
+            "DIALECT",
+            "2",
         )
 
         # Then get with offset (simulating page 2 with page size 1)
         result = redis_client.execute_command(
-            "FT.AGGREGATE", products_data,
+            "FT.AGGREGATE",
+            products_data,
             "@category:{books}",
-            "LOAD", "2", "@title", "@price",
-            "SORTBY", "2", "@price", "DESC",
-            "LIMIT", "1", "1",  # offset=1, count=1
-            "DIALECT", "2"
+            "LOAD",
+            "2",
+            "@title",
+            "@price",
+            "SORTBY",
+            "2",
+            "@price",
+            "DESC",
+            "LIMIT",
+            "1",
+            "1",  # offset=1, count=1
+            "DIALECT",
+            "2",
         )
 
         # Result count doesn't change with LIMIT in FT.AGGREGATE
@@ -241,4 +352,3 @@ class TestPaginationWithOffset:
             all_second = dict(zip(all_books[2][::2], all_books[2][1::2]))
             paginated_first = dict(zip(result[1][::2], result[1][1::2]))
             assert all_second.get("title") == paginated_first.get("title")
-

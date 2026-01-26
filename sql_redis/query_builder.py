@@ -105,8 +105,10 @@ class QueryBuilder:
         prefix = "-" if operator == "!=" else ""
 
         if operator == "BETWEEN":
-            min_val, max_val = value
-            return f"{prefix}@{field}:[{min_val} {max_val}]"
+            if isinstance(value, tuple):
+                min_val, max_val = value
+                return f"{prefix}@{field}:[{min_val} {max_val}]"
+            raise ValueError("BETWEEN operator requires a tuple (min, max)")
         elif operator == "=":
             return f"@{field}:[{value} {value}]"
         elif operator == "!=":

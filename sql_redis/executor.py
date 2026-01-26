@@ -44,10 +44,11 @@ class Executor:
         translated = self._translator.translate(sql)
 
         # Build command list and substitute vector params
-        cmd = list(translated.to_command_list())
+        # Use list[str | bytes] to allow bytes for vector params
+        cmd: list[str | bytes] = list(translated.to_command_list())
 
         # Find any bytes params (vectors) to substitute
-        vector_param = None
+        vector_param: bytes | None = None
         for value in params.values():
             if isinstance(value, bytes):
                 vector_param = value

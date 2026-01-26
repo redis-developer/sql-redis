@@ -248,7 +248,9 @@ class TestTagFieldMultiValueSearch:
             WHERE tags IN ('sale', 'featured') OR category = 'electronics'
             """
         )
-        assert len(result.rows) >= 1, "Should return products matching tag OR conditions"
+        assert (
+            len(result.rows) >= 1
+        ), "Should return products matching tag OR conditions"
 
     def test_tag_in_clause_only(self, executor: Executor, products_data: str):
         """IN clause on TAG field without OR."""
@@ -289,7 +291,9 @@ class TestTagFieldMultiValueSearch:
         for row in result.rows:
             assert row["category"] in ["electronics", "books"]
 
-    def test_or_with_different_field_types(self, executor: Executor, products_data: str):
+    def test_or_with_different_field_types(
+        self, executor: Executor, products_data: str
+    ):
         """OR condition across different field types (TAG and NUMERIC)."""
         result = executor.execute(
             f"""
@@ -336,4 +340,3 @@ class TestPaginationWithOffset:
         if len(all_books.rows) > 1 and len(paginated.rows) >= 1:
             # Second item from all_books should be first in paginated result
             assert all_books.rows[1]["title"] == paginated.rows[0]["title"]
-

@@ -2,26 +2,79 @@
 name = "sql-redis"
 version = "0.1.0"
 description = "SQL to Redis command translation utility"
-requires-python = ">=3.9"
+authors = [{ name = "Redis Inc.", email = "applied.ai@redis.com" }]
+requires-python = ">=3.9,<3.14"
+readme = "README.md"
+license = "MIT"
+keywords = [
+    "sql",
+    "redis",
+    "redis-client",
+    "query-translation",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+]
 dependencies = [
     "redis>=5.0.0",
     "sqlglot>=26.0.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.0.0",
-    "testcontainers[redis]>=4.0.0",
-]
+[project.urls]
+Homepage = "https://github.com/redis/sql-redis"
+Repository = "https://github.com/redis/sql-redis"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "black>=25.1.0,<26",
+    "isort>=5.6.4,<6",
+    "mypy>=1.11.0,<2",
+    "pytest>=8.0.0,<9",
+    "pytest-cov>=4.0.0,<5",
+    "pytest-asyncio>=0.23.6,<0.24",
+    "pre-commit>=4.1.0,<5",
+    "codespell>=2.4.1,<3",
+    "testcontainers[redis]>=4.0.0,<5",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.black]
+target-version = ['py39', 'py310', 'py311', 'py312', 'py313']
+exclude = '''
+(
+  | \.egg
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.nox
+  | \.tox
+  | \.venv
+  | _build
+  | build
+  | dist
+  | setup.py
+)
+'''
+
+[tool.isort]
+profile = "black"
+skip = [".git", ".venv", "venv", "env", "build", "dist"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=sql_redis --cov-report=term-missing"
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["sql_redis"]
@@ -32,4 +85,9 @@ exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",
 ]
+
+[tool.mypy]
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["env", "venv", ".venv"]
 

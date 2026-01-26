@@ -152,10 +152,18 @@ class Translator:
                 value,
             )
         elif field_type == "NUMERIC":
+            # Cast value to expected type for numeric conditions
+            numeric_value: int | float | tuple[int | float, int | float]
+            if isinstance(condition.value, tuple):
+                numeric_value = condition.value  # type: ignore[assignment]
+            elif isinstance(condition.value, (int, float)):
+                numeric_value = condition.value
+            else:
+                numeric_value = float(condition.value)  # type: ignore[arg-type]
             return self._query_builder.build_numeric_condition(
                 condition.field,
                 operator,
-                condition.value,
+                numeric_value,
             )
         else:
             # GEO, VECTOR, and unknown field types - default to text search
