@@ -14,45 +14,80 @@ def _create_test_indexes(redis_client: redis.Redis) -> list[str]:
 
     # Create products index
     redis_client.execute_command(
-        "FT.CREATE", "products",
-        "ON", "HASH",
-        "PREFIX", "1", "product:",
+        "FT.CREATE",
+        "products",
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "product:",
         "SCHEMA",
-        "title", "TEXT", "SORTABLE",
-        "price", "NUMERIC", "SORTABLE",
-        "category", "TAG",
+        "title",
+        "TEXT",
+        "SORTABLE",
+        "price",
+        "NUMERIC",
+        "SORTABLE",
+        "category",
+        "TAG",
     )
 
     # Create users index
     redis_client.execute_command(
-        "FT.CREATE", "users",
-        "ON", "HASH",
-        "PREFIX", "1", "user:",
+        "FT.CREATE",
+        "users",
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "user:",
         "SCHEMA",
-        "name", "TEXT",
-        "email", "TAG",
-        "age", "NUMERIC",
+        "name",
+        "TEXT",
+        "email",
+        "TAG",
+        "age",
+        "NUMERIC",
     )
 
     # Create stores index with GEO field
     redis_client.execute_command(
-        "FT.CREATE", "stores",
-        "ON", "HASH",
-        "PREFIX", "1", "store:",
+        "FT.CREATE",
+        "stores",
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "store:",
         "SCHEMA",
-        "name", "TEXT",
-        "location", "GEO",
+        "name",
+        "TEXT",
+        "location",
+        "GEO",
     )
 
     # Create vectors index with VECTOR field
     redis_client.execute_command(
-        "FT.CREATE", "vectors",
-        "ON", "HASH",
-        "PREFIX", "1", "vec:",
+        "FT.CREATE",
+        "vectors",
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "vec:",
         "SCHEMA",
-        "id", "TEXT",
-        "embedding", "VECTOR", "FLAT", "6",
-        "TYPE", "FLOAT32", "DIM", "128", "DISTANCE_METRIC", "COSINE",
+        "id",
+        "TEXT",
+        "embedding",
+        "VECTOR",
+        "FLAT",
+        "6",
+        "TYPE",
+        "FLOAT32",
+        "DIM",
+        "128",
+        "DISTANCE_METRIC",
+        "COSINE",
     )
 
     return ["products", "users", "stores", "vectors"]
@@ -82,7 +117,7 @@ class TestSchemaRegistryLoadAll:
         """load_all() should discover and load schemas for all indexes."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         for index_name in multi_index_setup:
             schema = registry.get_schema(index_name)
             assert schema is not None, f"Schema for {index_name} should be loaded"
@@ -94,17 +129,17 @@ class TestSchemaRegistryLoadAll:
         """load_all() should capture correct field types."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         # Verify products schema
         products = registry.get_schema("products")
         assert products["title"] == "TEXT"
         assert products["price"] == "NUMERIC"
         assert products["category"] == "TAG"
-        
+
         # Verify stores schema has GEO
         stores = registry.get_schema("stores")
         assert stores["location"] == "GEO"
-        
+
         # Verify vectors schema has VECTOR
         vectors = registry.get_schema("vectors")
         assert vectors["embedding"] == "VECTOR"
@@ -119,7 +154,7 @@ class TestSchemaRegistryGetFieldType:
         """get_field_type() should return the correct type for a field."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         assert registry.get_field_type("products", "title") == "TEXT"
         assert registry.get_field_type("products", "price") == "NUMERIC"
         assert registry.get_field_type("products", "category") == "TAG"
@@ -133,7 +168,7 @@ class TestSchemaRegistryGetFieldType:
         """get_field_type() should return None for unknown fields."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         assert registry.get_field_type("products", "nonexistent") is None
 
     def test_get_field_type_returns_none_for_unknown_index(
@@ -142,7 +177,7 @@ class TestSchemaRegistryGetFieldType:
         """get_field_type() should return None for unknown indexes."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         assert registry.get_field_type("nonexistent_index", "field") is None
 
 
@@ -155,7 +190,7 @@ class TestSchemaRegistryGetSchema:
         """get_schema() should return all fields for an index."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         products = registry.get_schema("products")
         assert set(products.keys()) == {"title", "price", "category"}
 
@@ -165,7 +200,7 @@ class TestSchemaRegistryGetSchema:
         """get_schema() should return empty dict for unknown indexes."""
         registry = SchemaRegistry(redis_client)
         registry.load_all()
-        
+
         assert registry.get_schema("nonexistent") == {}
 
 
@@ -231,12 +266,18 @@ class TestSchemaRegistryRefresh:
         # Drop and recreate with different schema
         redis_client.execute_command("FT.DROPINDEX", "products", "DD")
         redis_client.execute_command(
-            "FT.CREATE", "products",
-            "ON", "HASH",
-            "PREFIX", "1", "product:",
+            "FT.CREATE",
+            "products",
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "product:",
             "SCHEMA",
-            "name", "TEXT",  # Changed from title
-            "cost", "NUMERIC",  # Changed from price
+            "name",
+            "TEXT",  # Changed from title
+            "cost",
+            "NUMERIC",  # Changed from price
         )
 
         # Refresh just products
@@ -273,11 +314,16 @@ class TestSchemaRegistryRefresh:
 
         # Create a new index
         redis_client.execute_command(
-            "FT.CREATE", "new_index",
-            "ON", "HASH",
-            "PREFIX", "1", "new:",
+            "FT.CREATE",
+            "new_index",
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "new:",
             "SCHEMA",
-            "field1", "TEXT",
+            "field1",
+            "TEXT",
         )
 
         # Refresh the new index
@@ -343,12 +389,28 @@ class TestSchemaRegistryProcessEvents:
         try:
             # Create multiple indexes before processing
             redis_client.execute_command(
-                "FT.CREATE", "idx1", "ON", "HASH", "PREFIX", "1", "idx1:",
-                "SCHEMA", "f1", "TEXT"
+                "FT.CREATE",
+                "idx1",
+                "ON",
+                "HASH",
+                "PREFIX",
+                "1",
+                "idx1:",
+                "SCHEMA",
+                "f1",
+                "TEXT",
             )
             redis_client.execute_command(
-                "FT.CREATE", "idx2", "ON", "HASH", "PREFIX", "1", "idx2:",
-                "SCHEMA", "f2", "TEXT"
+                "FT.CREATE",
+                "idx2",
+                "ON",
+                "HASH",
+                "PREFIX",
+                "1",
+                "idx2:",
+                "SCHEMA",
+                "f2",
+                "TEXT",
             )
 
             # Process should detect both
@@ -360,9 +422,7 @@ class TestSchemaRegistryProcessEvents:
         finally:
             registry.stop_watching()
 
-    def test_process_pending_events_without_callback(
-        self, redis_client: redis.Redis
-    ):
+    def test_process_pending_events_without_callback(self, redis_client: redis.Redis):
         """process_pending_events() without on_change callback."""
         # Start with clean state
         for index_name in redis_client.execute_command("FT._LIST"):
@@ -377,8 +437,16 @@ class TestSchemaRegistryProcessEvents:
         try:
             # Create an index
             redis_client.execute_command(
-                "FT.CREATE", "nocb", "ON", "HASH", "PREFIX", "1", "nocb:",
-                "SCHEMA", "f1", "TEXT"
+                "FT.CREATE",
+                "nocb",
+                "ON",
+                "HASH",
+                "PREFIX",
+                "1",
+                "nocb:",
+                "SCHEMA",
+                "f1",
+                "TEXT",
             )
 
             # Process should detect and load without error
@@ -406,12 +474,28 @@ class TestSchemaRegistryProcessEvents:
 
         # Create indexes to delete
         redis_client.execute_command(
-            "FT.CREATE", "del1", "ON", "HASH", "PREFIX", "1", "del1:",
-            "SCHEMA", "f1", "TEXT"
+            "FT.CREATE",
+            "del1",
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "del1:",
+            "SCHEMA",
+            "f1",
+            "TEXT",
         )
         redis_client.execute_command(
-            "FT.CREATE", "del2", "ON", "HASH", "PREFIX", "1", "del2:",
-            "SCHEMA", "f2", "TEXT"
+            "FT.CREATE",
+            "del2",
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "del2:",
+            "SCHEMA",
+            "f2",
+            "TEXT",
         )
 
         registry = SchemaRegistry(redis_client)
@@ -460,15 +544,21 @@ class TestSchemaRegistryWatching:
         try:
             # Create a new index
             redis_client.execute_command(
-                "FT.CREATE", "watched_index",
-                "ON", "HASH",
-                "PREFIX", "1", "watched:",
+                "FT.CREATE",
+                "watched_index",
+                "ON",
+                "HASH",
+                "PREFIX",
+                "1",
+                "watched:",
                 "SCHEMA",
-                "data", "TEXT",
+                "data",
+                "TEXT",
             )
 
             # Give pub/sub time to receive the message
             import time
+
             time.sleep(0.5)
 
             # Process pending messages
@@ -502,6 +592,7 @@ class TestSchemaRegistryWatching:
             redis_client.execute_command("FT.DROPINDEX", "users", "DD")
 
             import time
+
             time.sleep(0.5)
 
             registry.process_pending_events()
@@ -531,16 +622,21 @@ class TestSchemaRegistryWatching:
 
         # Create an index after stopping
         redis_client.execute_command(
-            "FT.CREATE", "unwatched_index",
-            "ON", "HASH",
-            "PREFIX", "1", "unwatched:",
+            "FT.CREATE",
+            "unwatched_index",
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "unwatched:",
             "SCHEMA",
-            "field", "TEXT",
+            "field",
+            "TEXT",
         )
 
         import time
+
         time.sleep(0.5)
 
         # Should not have received any callbacks
         assert not any(idx == "unwatched_index" for _, idx in callbacks_received)
-

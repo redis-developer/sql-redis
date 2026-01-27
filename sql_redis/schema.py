@@ -1,5 +1,7 @@
 """Schema registry for Redis search indexes."""
 
+from __future__ import annotations
+
 from typing import Callable
 
 import redis
@@ -22,6 +24,9 @@ class SchemaRegistry:
         self._schemas.clear()
         indexes = self._client.execute_command("FT._LIST")
         for index_name in indexes:
+            # Decode bytes to string if needed
+            if isinstance(index_name, bytes):
+                index_name = index_name.decode("utf-8")
             self._load_index_schema(index_name)
 
     def _load_index_schema(self, index_name: str) -> None:
@@ -39,18 +44,27 @@ class SchemaRegistry:
         schema = {}
         # Find the 'attributes' section in the info response
         for i, item in enumerate(info):
-            if item == "attributes":
+            # Handle bytes or string comparison
+            item_str = item.decode("utf-8") if isinstance(item, bytes) else item
+            if item_str == "attributes":
                 attributes = info[i + 1]
                 for attr in attributes:
                     field_name = None
                     field_type = None
                     # Each attribute is a list like:
-                    # ['identifier', 'title', 'attribute', 'title', 'type', 'TEXT', ...]
+                    # [b'identifier', b'title', b'attribute', b'title', b'type', b'TEXT', ...]
                     for j, val in enumerate(attr):
-                        if val == "attribute" and j + 1 < len(attr):
-                            field_name = attr[j + 1]
-                        if val == "type" and j + 1 < len(attr):
-                            field_type = attr[j + 1]
+                        val_str = val.decode("utf-8") if isinstance(val, bytes) else val
+                        if val_str == "attribute" and j + 1 < len(attr):
+                            fn = attr[j + 1]
+                            field_name = (
+                                fn.decode("utf-8") if isinstance(fn, bytes) else fn
+                            )
+                        if val_str == "type" and j + 1 < len(attr):
+                            ft = attr[j + 1]
+                            field_type = (
+                                ft.decode("utf-8") if isinstance(ft, bytes) else ft
+                            )
                     if field_name and field_type:
                         schema[field_name] = field_type
                 break
@@ -126,4 +140,3 @@ class SchemaRegistry:
             self._schemas.pop(idx, None)
             if self._on_change:
                 self._on_change("dropped", idx)
-

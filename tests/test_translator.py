@@ -3,8 +3,8 @@
 import pytest
 import redis
 
-from sql_redis.translator import Translator, TranslatedQuery
 from sql_redis.schema import SchemaRegistry
+from sql_redis.translator import TranslatedQuery, Translator
 
 
 @pytest.fixture
@@ -18,13 +18,24 @@ def basic_index(redis_client: redis.Redis) -> str:
         pass
     # Create index
     redis_client.execute_command(
-        "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "doc:",
+        "FT.CREATE",
+        index_name,
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "doc:",
         "SCHEMA",
-        "title", "TEXT",
-        "content", "TEXT",
-        "category", "TAG",
-        "price", "NUMERIC",
-        "status", "TAG",
+        "title",
+        "TEXT",
+        "content",
+        "TEXT",
+        "category",
+        "TAG",
+        "price",
+        "NUMERIC",
+        "status",
+        "TAG",
     )
     return index_name
 
@@ -38,10 +49,18 @@ def geo_index(redis_client: redis.Redis) -> str:
     except redis.ResponseError:
         pass
     redis_client.execute_command(
-        "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "store:",
+        "FT.CREATE",
+        index_name,
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "store:",
         "SCHEMA",
-        "name", "TEXT",
-        "location", "GEO",
+        "name",
+        "TEXT",
+        "location",
+        "GEO",
     )
     return index_name
 
@@ -55,10 +74,26 @@ def vector_index(redis_client: redis.Redis) -> str:
     except redis.ResponseError:
         pass
     redis_client.execute_command(
-        "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "vec:",
+        "FT.CREATE",
+        index_name,
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "vec:",
         "SCHEMA",
-        "title", "TEXT",
-        "embedding", "VECTOR", "HNSW", "6", "TYPE", "FLOAT32", "DIM", "128", "DISTANCE_METRIC", "COSINE",
+        "title",
+        "TEXT",
+        "embedding",
+        "VECTOR",
+        "HNSW",
+        "6",
+        "TYPE",
+        "FLOAT32",
+        "DIM",
+        "128",
+        "DISTANCE_METRIC",
+        "COSINE",
     )
     return index_name
 
@@ -103,9 +138,7 @@ class TestTranslatorBasicSearch:
 
     def test_select_with_numeric_filter(self, translator: Translator, basic_index: str):
         """SELECT with NUMERIC field condition."""
-        result = translator.translate(
-            f"SELECT * FROM {basic_index} WHERE price > 100"
-        )
+        result = translator.translate(f"SELECT * FROM {basic_index} WHERE price > 100")
 
         assert result.command == "FT.SEARCH"
         assert result.query_string == "@price:[(100 +inf]"
@@ -121,9 +154,7 @@ class TestTranslatorBasicSearch:
 
     def test_select_specific_fields(self, translator: Translator, basic_index: str):
         """SELECT specific fields adds RETURN clause."""
-        result = translator.translate(
-            f"SELECT title, price FROM {basic_index}"
-        )
+        result = translator.translate(f"SELECT title, price FROM {basic_index}")
 
         assert "RETURN" in result.args
         idx = result.args.index("RETURN")
@@ -133,9 +164,7 @@ class TestTranslatorBasicSearch:
 
     def test_select_with_limit(self, translator: Translator, basic_index: str):
         """SELECT with LIMIT adds LIMIT args."""
-        result = translator.translate(
-            f"SELECT * FROM {basic_index} LIMIT 10"
-        )
+        result = translator.translate(f"SELECT * FROM {basic_index} LIMIT 10")
 
         assert "LIMIT" in result.args
         idx = result.args.index("LIMIT")
@@ -144,9 +173,7 @@ class TestTranslatorBasicSearch:
 
     def test_select_with_limit_offset(self, translator: Translator, basic_index: str):
         """SELECT with LIMIT and OFFSET."""
-        result = translator.translate(
-            f"SELECT * FROM {basic_index} LIMIT 10 OFFSET 20"
-        )
+        result = translator.translate(f"SELECT * FROM {basic_index} LIMIT 10 OFFSET 20")
 
         idx = result.args.index("LIMIT")
         assert result.args[idx + 1] == "20"  # offset
@@ -248,9 +275,7 @@ class TestTranslatorAggregate:
 
     def test_aggregate_with_limit(self, translator: Translator, basic_index: str):
         """FT.AGGREGATE with LIMIT."""
-        result = translator.translate(
-            f"SELECT COUNT(*) FROM {basic_index} LIMIT 5"
-        )
+        result = translator.translate(f"SELECT COUNT(*) FROM {basic_index} LIMIT 5")
 
         assert "LIMIT" in result.args
 
@@ -345,4 +370,3 @@ class TestTranslatorOutput:
 
         assert cmd_str.startswith("FT.SEARCH")
         assert basic_index in cmd_str
-

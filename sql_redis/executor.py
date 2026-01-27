@@ -1,5 +1,7 @@
 """SQL Executor - executes translated queries against Redis."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import redis
@@ -25,9 +27,7 @@ class Executor:
         self._schema_registry = schema_registry
         self._translator = Translator(schema_registry)
 
-    def execute(
-        self, sql: str, *, params: dict | None = None
-    ) -> QueryResult:
+    def execute(self, sql: str, *, params: dict | None = None) -> QueryResult:
         """Execute a SQL query and return results."""
         params = params or {}
 
@@ -44,10 +44,11 @@ class Executor:
         translated = self._translator.translate(sql)
 
         # Build command list and substitute vector params
-        cmd = list(translated.to_command_list())
+        # Use list[str | bytes] to allow bytes for vector params
+        cmd: list[str | bytes] = list(translated.to_command_list())
 
         # Find any bytes params (vectors) to substitute
-        vector_param = None
+        vector_param: bytes | None = None
         for value in params.values():
             if isinstance(value, bytes):
                 vector_param = value
@@ -80,4 +81,3 @@ class Executor:
                 rows.append(row)
 
         return QueryResult(rows=rows, count=count)
-

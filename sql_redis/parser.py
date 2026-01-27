@@ -1,5 +1,7 @@
 """SQL parser component using sqlglot."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 import sqlglot
@@ -9,6 +11,7 @@ from sqlglot import exp
 @dataclass
 class AggregationSpec:
     """Specification for an aggregation function."""
+
     function: str
     field: str | None = None
     alias: str | None = None
@@ -17,6 +20,7 @@ class AggregationSpec:
 @dataclass
 class ComputedField:
     """Specification for a computed/APPLY field."""
+
     expression: str
     alias: str
 
@@ -24,6 +28,7 @@ class ComputedField:
 @dataclass
 class VectorSearchSpec:
     """Specification for vector search."""
+
     field: str
     alias: str
     k: int | None = None
@@ -32,6 +37,7 @@ class VectorSearchSpec:
 @dataclass
 class Condition:
     """A WHERE condition."""
+
     field: str
     operator: str
     value: object
@@ -41,6 +47,7 @@ class Condition:
 @dataclass
 class ParsedQuery:
     """Result of parsing a SQL query."""
+
     index: str = ""
     fields: list[str] = field(default_factory=list)
     conditions: list[Condition] = field(default_factory=list)
@@ -49,7 +56,9 @@ class ParsedQuery:
     computed_fields: list[ComputedField] = field(default_factory=list)
     vector_search: VectorSearchSpec | None = None
     groupby_fields: list[str] = field(default_factory=list)
-    orderby_fields: list[tuple[str, str]] = field(default_factory=list)  # (field, ASC|DESC)
+    orderby_fields: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (field, ASC|DESC)
     limit: int | None = None
     offset: int | None = None
 
@@ -102,6 +111,10 @@ class SQLParser:
                 if isinstance(col, exp.Column):
                     direction = "DESC" if ordered.args.get("desc") else "ASC"
                     result.orderby_fields.append((col.name, direction))
+                elif isinstance(col, (exp.CosineDistance, exp.Distance)):
+                    # ORDER BY vector distance - handled by KNN, don't add to orderby
+                    # The vector_search should already be set from SELECT clause
+                    pass
 
         # Extract LIMIT clause
         limit = ast.find(exp.Limit)
@@ -166,6 +179,11 @@ class SQLParser:
             result.computed_fields.append(
                 ComputedField(expression=expr_str, alias=field_alias)
             )
+        elif isinstance(expression, (exp.Distance, exp.CosineDistance)):
+            # Vector distance functions:
+            # - Distance: L2/Euclidean distance
+            # - CosineDistance: cosine_distance() function
+            self._process_vector_distance(expression, result, alias)
         elif isinstance(expression, exp.Anonymous):
             # Custom function call (e.g., vector_distance) - check before exp.Func
             # since Anonymous is a subclass of Func
@@ -193,6 +211,23 @@ class SQLParser:
             field_alias = alias if alias else expr_str
             result.computed_fields.append(
                 ComputedField(expression=expr_str, alias=field_alias)
+            )
+
+    def _process_vector_distance(
+        self, expression, result: ParsedQuery, alias: str | None
+    ) -> None:
+        """Process a vector distance expression (cosine_distance, etc.)."""
+        field_name = None
+
+        # Extract field from the expression
+        # Both Distance and CosineDistance have 'this' as the first argument
+        if expression.this and isinstance(expression.this, exp.Column):
+            field_name = expression.this.name
+
+        if field_name:
+            result.vector_search = VectorSearchSpec(
+                field=field_name,
+                alias=alias or "vector_distance",
             )
 
     def _process_where_clause(
@@ -259,7 +294,9 @@ class SQLParser:
 
         if field_name is not None:
             result.conditions.append(
-                Condition(field=field_name, operator=operator, value=value, negated=negated)
+                Condition(
+                    field=field_name, operator=operator, value=value, negated=negated
+                )
             )
 
     def _add_between_condition(
@@ -286,9 +323,7 @@ class SQLParser:
                 )
             )
 
-    def _add_in_condition(
-        self, expression, result: ParsedQuery, negated: bool
-    ) -> None:
+    def _add_in_condition(self, expression, result: ParsedQuery, negated: bool) -> None:
         """Add an IN condition."""
         field_name = None
         if isinstance(expression.this, exp.Column):
@@ -298,7 +333,9 @@ class SQLParser:
 
         if field_name is not None:
             result.conditions.append(
-                Condition(field=field_name, operator="IN", value=values, negated=negated)
+                Condition(
+                    field=field_name, operator="IN", value=values, negated=negated
+                )
             )
 
     def _add_function_condition(
@@ -318,7 +355,12 @@ class SQLParser:
 
             if field_name is not None:
                 result.conditions.append(
-                    Condition(field=field_name, operator="FULLTEXT", value=value, negated=negated)
+                    Condition(
+                        field=field_name,
+                        operator="FULLTEXT",
+                        value=value,
+                        negated=negated,
+                    )
                 )
 
     def _extract_literal_value(self, expression):

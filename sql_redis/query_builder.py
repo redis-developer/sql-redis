@@ -1,5 +1,7 @@
 """RediSearch query builder - generates query syntax from analyzed queries."""
 
+from __future__ import annotations
+
 
 class QueryBuilder:
     """Builds RediSearch query syntax from conditions."""
@@ -46,7 +48,7 @@ class QueryBuilder:
             search_value = value
 
         return f"{prefix}@{field}:{search_value}"
-    
+
     def _escape_tag_value(self, value: str) -> str:
         """Escape special characters in TAG values."""
         result = []
@@ -83,7 +85,7 @@ class QueryBuilder:
             tag_str = self._escape_tag_value(value)
 
         return f"{prefix}@{field}:{{{tag_str}}}"
-    
+
     def build_numeric_condition(
         self,
         field: str,
@@ -103,8 +105,10 @@ class QueryBuilder:
         prefix = "-" if operator == "!=" else ""
 
         if operator == "BETWEEN":
-            min_val, max_val = value
-            return f"{prefix}@{field}:[{min_val} {max_val}]"
+            if isinstance(value, tuple):
+                min_val, max_val = value
+                return f"{prefix}@{field}:[{min_val} {max_val}]"
+            raise ValueError("BETWEEN operator requires a tuple (min, max)")
         elif operator == "=":
             return f"@{field}:[{value} {value}]"
         elif operator == "!=":
@@ -119,7 +123,7 @@ class QueryBuilder:
             return f"@{field}:[-inf {value}]"
         else:
             raise ValueError(f"Unknown numeric operator: {operator}")
-    
+
     def build_vector_condition(
         self,
         field: str,
@@ -142,7 +146,7 @@ class QueryBuilder:
         if prefilter:
             return f"({prefilter}){knn_part}"
         return knn_part
-    
+
     def build_geo_filter(
         self,
         field: str,
@@ -164,7 +168,7 @@ class QueryBuilder:
             GEOFILTER clause like "GEOFILTER field lon lat radius unit".
         """
         return f"GEOFILTER {field} {lon} {lat} {radius} {unit}"
-    
+
     def build_geo_distance_apply(
         self,
         field: str,
@@ -198,7 +202,7 @@ class QueryBuilder:
             expr = base_expr
 
         return f'APPLY "{expr}" AS {alias}'
-    
+
     def combine_conditions(
         self,
         conditions: list[str],
@@ -220,12 +224,14 @@ class QueryBuilder:
 
         if operator == "OR":
             # OR uses pipe separator - each condition needs parentheses
-            parenthesized = [f"({c})" if not c.startswith("(") else c for c in conditions]
+            parenthesized = [
+                f"({c})" if not c.startswith("(") else c for c in conditions
+            ]
             return "(" + "|".join(parenthesized) + ")"
         else:
             # AND uses space separator
             return " ".join(conditions)
-    
+
     def build_query_string(
         self,
         text_conditions: list[tuple] | None = None,
@@ -262,4 +268,3 @@ class QueryBuilder:
                 parts.append(self.build_tag_condition(field, operator, value))
 
         return self.combine_conditions(parts, "AND")
-

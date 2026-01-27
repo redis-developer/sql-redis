@@ -1,13 +1,16 @@
 """SQL analyzer component - resolves field types from schema."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
-from sql_redis.parser import ParsedQuery, AggregationSpec, ComputedField, Condition
+from sql_redis.parser import AggregationSpec, ComputedField, Condition, ParsedQuery
 
 
 @dataclass
 class VectorSearchAnalysis:
     """Analyzed vector search details."""
+
     field: str
     k: int
     alias: str
@@ -16,7 +19,7 @@ class VectorSearchAnalysis:
 @dataclass
 class AnalyzedQuery:
     """Result of analyzing a parsed SQL query with schema context."""
-    
+
     parsed: ParsedQuery = field(default_factory=ParsedQuery)
     field_types: dict[str, str] = field(default_factory=dict)
     aggregations: list[AggregationSpec] = field(default_factory=list)
@@ -25,15 +28,16 @@ class AnalyzedQuery:
     is_global_aggregation: bool = False
     vector_search: VectorSearchAnalysis | None = None
     has_prefilter: bool = False
-    
+
     def get_field_type(self, field_name: str) -> str | None:
         """Get the type of a field."""
         return self.field_types.get(field_name)
-    
+
     def get_conditions_by_type(self, field_type: str) -> list[Condition]:
         """Get conditions for fields of a specific type."""
         return [
-            c for c in self.parsed.conditions
+            c
+            for c in self.parsed.conditions
             if self.field_types.get(c.field) == field_type
         ]
 
@@ -127,4 +131,3 @@ class Analyzer:
             result.has_prefilter = len(parsed.conditions) > 0
 
         return result
-

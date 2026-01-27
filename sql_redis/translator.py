@@ -1,9 +1,11 @@
 """SQL to Redis command translator."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
-from sql_redis.parser import SQLParser, ParsedQuery, Condition
-from sql_redis.analyzer import Analyzer, AnalyzedQuery
+from sql_redis.analyzer import AnalyzedQuery, Analyzer
+from sql_redis.parser import Condition, ParsedQuery, SQLParser
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import SchemaRegistry
 
@@ -139,17 +141,29 @@ class Translator:
             )
         elif field_type == "TAG":
             # Keep list value for IN clauses, convert scalar to string
-            value = condition.value if isinstance(condition.value, list) else str(condition.value)
+            value = (
+                condition.value
+                if isinstance(condition.value, list)
+                else str(condition.value)
+            )
             return self._query_builder.build_tag_condition(
                 condition.field,
                 operator,
                 value,
             )
         elif field_type == "NUMERIC":
+            # Cast value to expected type for numeric conditions
+            numeric_value: int | float | tuple[int | float, int | float]
+            if isinstance(condition.value, tuple):
+                numeric_value = condition.value  # type: ignore[assignment]
+            elif isinstance(condition.value, (int, float)):
+                numeric_value = condition.value
+            else:
+                numeric_value = float(condition.value)  # type: ignore[arg-type]
             return self._query_builder.build_numeric_condition(
                 condition.field,
                 operator,
-                condition.value,
+                numeric_value,
             )
         else:
             # GEO, VECTOR, and unknown field types - default to text search

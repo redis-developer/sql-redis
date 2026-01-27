@@ -2,7 +2,7 @@
 
 import pytest
 
-from sql_redis.parser import SQLParser, ParsedQuery
+from sql_redis.parser import ParsedQuery, SQLParser
 
 
 class TestSQLParserSelectClause:
@@ -12,7 +12,7 @@ class TestSQLParserSelectClause:
         """Parse SELECT with simple field list."""
         parser = SQLParser()
         result = parser.parse("SELECT title, price FROM products")
-        
+
         assert result.fields == ["title", "price"]
         assert result.index == "products"
 
@@ -20,7 +20,7 @@ class TestSQLParserSelectClause:
         """Parse SELECT *."""
         parser = SQLParser()
         result = parser.parse("SELECT * FROM products")
-        
+
         assert result.fields == ["*"]
 
     def test_parse_aggregation_functions(self):
@@ -29,7 +29,7 @@ class TestSQLParserSelectClause:
         result = parser.parse(
             "SELECT category, COUNT(*) AS count, SUM(price) AS total FROM products"
         )
-        
+
         assert "category" in result.fields
         assert len(result.aggregations) == 2
         assert result.aggregations[0].function == "COUNT"
@@ -41,9 +41,7 @@ class TestSQLParserSelectClause:
     def test_parse_computed_field(self):
         """Parse SELECT with computed expression."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT price, (price * 0.9) AS discounted FROM products"
-        )
+        result = parser.parse("SELECT price, (price * 0.9) AS discounted FROM products")
 
         assert len(result.computed_fields) == 1
         assert result.computed_fields[0].expression == "price * 0.9"
@@ -52,9 +50,7 @@ class TestSQLParserSelectClause:
     def test_parse_computed_field_without_parens(self):
         """Parse SELECT with arithmetic expression without parentheses."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT price * 0.9 AS discounted FROM products"
-        )
+        result = parser.parse("SELECT price * 0.9 AS discounted FROM products")
 
         assert len(result.computed_fields) == 1
         assert result.computed_fields[0].expression == "price * 0.9"
@@ -63,9 +59,7 @@ class TestSQLParserSelectClause:
     def test_parse_computed_field_without_alias(self):
         """Parse SELECT with computed expression without alias."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT (price * 0.9) FROM products"
-        )
+        result = parser.parse("SELECT (price * 0.9) FROM products")
 
         assert len(result.computed_fields) == 1
         assert result.computed_fields[0].expression == "price * 0.9"
@@ -78,7 +72,7 @@ class TestSQLParserSelectClause:
         result = parser.parse(
             "SELECT id, vector_distance(embedding, :vector) AS similarity FROM vectors"
         )
-        
+
         assert result.vector_search is not None
         assert result.vector_search.field == "embedding"
         assert result.vector_search.alias == "similarity"
@@ -91,14 +85,14 @@ class TestSQLParserFromClause:
         """Parse simple FROM clause."""
         parser = SQLParser()
         result = parser.parse("SELECT * FROM products")
-        
+
         assert result.index == "products"
 
     def test_parse_from_with_alias(self):
         """Parse FROM with table alias."""
         parser = SQLParser()
         result = parser.parse("SELECT p.title FROM products p")
-        
+
         assert result.index == "products"
 
 
@@ -109,7 +103,7 @@ class TestSQLParserWhereClause:
         """Parse WHERE with equality."""
         parser = SQLParser()
         result = parser.parse("SELECT * FROM products WHERE category = 'electronics'")
-        
+
         assert len(result.conditions) == 1
         assert result.conditions[0].field == "category"
         assert result.conditions[0].operator == "="
@@ -119,7 +113,7 @@ class TestSQLParserWhereClause:
         """Parse WHERE with numeric comparison."""
         parser = SQLParser()
         result = parser.parse("SELECT * FROM products WHERE price > 100")
-        
+
         assert result.conditions[0].field == "price"
         assert result.conditions[0].operator == ">"
         assert result.conditions[0].value == 100
@@ -128,7 +122,7 @@ class TestSQLParserWhereClause:
         """Parse WHERE with BETWEEN."""
         parser = SQLParser()
         result = parser.parse("SELECT * FROM products WHERE price BETWEEN 100 AND 500")
-        
+
         assert result.conditions[0].field == "price"
         assert result.conditions[0].operator == "BETWEEN"
         assert result.conditions[0].value == (100, 500)
@@ -136,8 +130,10 @@ class TestSQLParserWhereClause:
     def test_parse_in_clause(self):
         """Parse WHERE with IN."""
         parser = SQLParser()
-        result = parser.parse("SELECT * FROM products WHERE tags IN ('sale', 'featured')")
-        
+        result = parser.parse(
+            "SELECT * FROM products WHERE tags IN ('sale', 'featured')"
+        )
+
         assert result.conditions[0].field == "tags"
         assert result.conditions[0].operator == "IN"
         assert result.conditions[0].value == ["sale", "featured"]
@@ -157,7 +153,7 @@ class TestSQLParserWhereClause:
         result = parser.parse(
             "SELECT * FROM products WHERE price > 100 AND category = 'electronics'"
         )
-        
+
         assert len(result.conditions) == 2
         assert result.boolean_operator == "AND"
 
@@ -167,7 +163,7 @@ class TestSQLParserWhereClause:
         result = parser.parse(
             "SELECT * FROM products WHERE category = 'books' OR category = 'electronics'"
         )
-        
+
         assert len(result.conditions) == 2
         assert result.boolean_operator == "OR"
 
@@ -285,9 +281,7 @@ class TestSQLParserLimitOffset:
     def test_parse_limit_with_order_by(self):
         """Parse LIMIT with ORDER BY."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM products ORDER BY price DESC LIMIT 5"
-        )
+        result = parser.parse("SELECT * FROM products ORDER BY price DESC LIMIT 5")
 
         assert result.orderby_fields == [("price", "DESC")]
         assert result.limit == 5
@@ -375,9 +369,7 @@ class TestSQLParserEdgeCases:
     def test_parse_vector_distance_without_alias(self):
         """Parse vector_distance without explicit alias."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT vector_distance(embedding, :vec) FROM vectors"
-        )
+        result = parser.parse("SELECT vector_distance(embedding, :vec) FROM vectors")
 
         assert result.vector_search is not None
         assert result.vector_search.field == "embedding"
@@ -422,9 +414,7 @@ class TestSQLParserEdgeCases:
     def test_parse_not_between(self):
         """Parse NOT BETWEEN condition."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM products WHERE NOT price BETWEEN 0 AND 10"
-        )
+        result = parser.parse("SELECT * FROM products WHERE NOT price BETWEEN 0 AND 10")
 
         assert result.conditions[0].operator == "BETWEEN"
         assert result.conditions[0].negated is True
@@ -617,7 +607,9 @@ class TestSQLParserEdgeCases:
     def test_parse_fulltext_non_column_first_arg(self):
         """Parse fulltext with non-column first argument."""
         parser = SQLParser()
-        result = parser.parse("SELECT * FROM products WHERE fulltext(UPPER(title), 'query')")
+        result = parser.parse(
+            "SELECT * FROM products WHERE fulltext(UPPER(title), 'query')"
+        )
 
         # First arg is a function, not Column - condition skipped
         assert len(result.conditions) == 0
@@ -692,7 +684,9 @@ class TestSQLParserEdgeCases:
     def test_parse_count_distinct(self):
         """Parse COUNT(DISTINCT field) - this isn't Column or Star."""
         parser = SQLParser()
-        result = parser.parse("SELECT COUNT(DISTINCT category) AS unique_cats FROM products")
+        result = parser.parse(
+            "SELECT COUNT(DISTINCT category) AS unique_cats FROM products"
+        )
 
         # DISTINCT wraps the column, so field stays None
         assert len(result.aggregations) == 1
@@ -750,4 +744,3 @@ class TestSQLParserComplexQueries:
         assert len(result.conditions) == 1
         assert result.conditions[0].field == "category"
         assert result.limit == 5
-
