@@ -67,24 +67,9 @@ exclude = '''
 )
 '''
 
-[tool.isort]
-profile = "black"
-skip = [".git", ".venv", "venv", "env", "build", "dist"]
-
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--cov=sql_redis --cov-report=term-missing"
+log_cli = true
 asyncio_mode = "auto"
-
-[tool.coverage.run]
-source = ["sql_redis"]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "raise NotImplementedError",
-]
 
 [tool.mypy]
 warn_unused_configs = true
