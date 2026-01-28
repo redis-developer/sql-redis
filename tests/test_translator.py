@@ -288,6 +288,53 @@ class TestTranslatorAggregate:
         assert result.command == "FT.AGGREGATE"
         assert "APPLY" in result.args
 
+    def test_count_with_field_uses_zero_args(
+        self, translator: Translator, basic_index: str
+    ):
+        """COUNT(field) should generate REDUCE COUNT 0, not REDUCE COUNT 1 @field.
+
+        Redis COUNT reducer always takes 0 arguments - it counts rows, not field values.
+        """
+        result = translator.translate(
+            f"SELECT category, COUNT(price) AS count_price FROM {basic_index} GROUP BY category"
+        )
+
+        assert result.command == "FT.AGGREGATE"
+        # Find REDUCE COUNT in args and verify it's followed by "0"
+        args = result.args
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "COUNT"
+        assert args[reduce_idx + 2] == "0"  # COUNT always takes 0 args
+        # Should NOT have @price after COUNT
+        assert "@price" not in args[reduce_idx + 2 : reduce_idx + 4]
+
+    def test_count_star_uses_zero_args(self, translator: Translator, basic_index: str):
+        """COUNT(*) should generate REDUCE COUNT 0."""
+        result = translator.translate(
+            f"SELECT category, COUNT(*) AS cnt FROM {basic_index} GROUP BY category"
+        )
+
+        args = result.args
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "COUNT"
+        assert args[reduce_idx + 2] == "0"
+
+    def test_count_distinct_reducer(self, translator: Translator, basic_index: str):
+        """COUNT_DISTINCT(field) should generate REDUCE COUNT_DISTINCT 1 @field."""
+        result = translator.translate(
+            f"SELECT category, COUNT_DISTINCT(title) AS unique_titles "
+            f"FROM {basic_index} GROUP BY category"
+        )
+
+        assert result.command == "FT.AGGREGATE"
+        args = result.args
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "COUNT_DISTINCT"
+        assert args[reduce_idx + 2] == "1"
+        assert args[reduce_idx + 3] == "@title"
+        assert "AS" in args
+        assert "unique_titles" in args
+
 
 class TestTranslatorVectorSearch:
     """Tests for vector search translation."""

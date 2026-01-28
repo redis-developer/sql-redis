@@ -257,7 +257,10 @@ class Translator:
             for agg in analyzed.aggregations:
                 args.append("REDUCE")
                 args.append(agg.function.upper())
-                if agg.field:
+                # COUNT always takes 0 arguments in Redis
+                if agg.function.upper() == "COUNT":
+                    args.append("0")
+                elif agg.field:
                     args.extend(["1", f"@{agg.field}"])
                 else:
                     args.append("0")
@@ -269,7 +272,10 @@ class Translator:
             for agg in analyzed.aggregations:
                 args.append("REDUCE")
                 args.append(agg.function.upper())
-                if agg.field:
+                # COUNT always takes 0 arguments in Redis
+                if agg.function.upper() == "COUNT":
+                    args.append("0")
+                elif agg.field:
                     args.extend(["1", f"@{agg.field}"])
                 else:
                     args.append("0")

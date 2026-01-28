@@ -150,9 +150,28 @@ class SQLParser:
             result.fields.append(expression.name)
         elif isinstance(expression, exp.Star):
             result.fields.append("*")
-        elif isinstance(expression, (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)):
+        elif isinstance(
+            expression,
+            (
+                exp.Count,
+                exp.Sum,
+                exp.Avg,
+                exp.Min,
+                exp.Max,
+                exp.Stddev,
+                exp.Variance,
+                exp.FirstValue,
+                exp.ArrayAgg,
+            ),
+        ):
             # Aggregation function
+            # Map sqlglot function names to Redis reducer names
             func_name = expression.key.upper()
+            redis_func_map = {
+                "FIRSTVALUE": "FIRST_VALUE",
+                "ARRAYAGG": "TOLIST",
+            }
+            func_name = redis_func_map.get(func_name, func_name)
             field_name = None
             # Get the field being aggregated (if any)
             if expression.this:
@@ -188,6 +207,13 @@ class SQLParser:
             # Custom function call (e.g., vector_distance) - check before exp.Func
             # since Anonymous is a subclass of Func
             func_name = expression.name.lower()
+            # Redis-specific reducer functions that sqlglot doesn't recognize
+            redis_reducers = {
+                "count_distinct",
+                "count_distinctish",
+                "quantile",
+                "random_sample",
+            }
             if func_name == "vector_distance":
                 # Extract the vector field name from first argument
                 if expression.expressions:
@@ -198,6 +224,18 @@ class SQLParser:
                             field=field_name,
                             alias=alias or func_name,
                         )
+            elif func_name in redis_reducers:
+                # Redis-specific reducer functions
+                field_name = None
+                if expression.expressions:
+                    first_arg = expression.expressions[0]
+                    if isinstance(first_arg, exp.Column):
+                        field_name = first_arg.name
+                result.aggregations.append(
+                    AggregationSpec(
+                        function=func_name.upper(), field=field_name, alias=alias
+                    )
+                )
             else:
                 # Other custom functions - treat as computed field
                 expr_str = expression.sql()
