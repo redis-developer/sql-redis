@@ -189,11 +189,17 @@ class Translator:
             args.append("2")
             params["vector"] = None  # Placeholder for vector bytes
 
-        # RETURN clause
-        if parsed.fields and parsed.fields != ["*"]:
+        # RETURN clause - include vector distance alias if present
+        return_fields = list(parsed.fields) if parsed.fields else []
+        if analyzed.vector_search and analyzed.vector_search.alias:
+            # Add vector distance alias to return fields (like VectorQuery with return_score=True)
+            if analyzed.vector_search.alias not in return_fields:
+                return_fields.append(analyzed.vector_search.alias)
+
+        if return_fields and return_fields != ["*"]:
             args.append("RETURN")
-            args.append(str(len(parsed.fields)))
-            args.extend(parsed.fields)
+            args.append(str(len(return_fields)))
+            args.extend(return_fields)
 
         # SORTBY
         if parsed.orderby_fields:

@@ -301,6 +301,11 @@ class TestVectorSearch:
         assert len(result.rows) <= 3
         # First result should be closest to query vector
         assert result.rows[0]["title"] == "First"
+        # Verify vector distance score is returned (like VectorQuery with return_score=True)
+        assert "score" in result.rows[0]
+        # Score should be a valid distance value (0 for exact match with cosine)
+        score = float(result.rows[0]["score"])
+        assert score >= 0  # Distance should be non-negative
 
 
 class TestErrorHandling:
