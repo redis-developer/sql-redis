@@ -335,6 +335,23 @@ class TestTranslatorAggregate:
         assert "AS" in args
         assert "unique_titles" in args
 
+    def test_quantile_reducer(self, translator: Translator, basic_index: str):
+        """QUANTILE(field, value) should generate REDUCE QUANTILE 2 @field value."""
+        result = translator.translate(
+            f"SELECT category, QUANTILE(price, 0.5) AS median_price "
+            f"FROM {basic_index} GROUP BY category"
+        )
+
+        assert result.command == "FT.AGGREGATE"
+        args = result.args
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "QUANTILE"
+        assert args[reduce_idx + 2] == "2"  # nargs = 1 (field) + 1 (quantile value)
+        assert args[reduce_idx + 3] == "@price"
+        assert args[reduce_idx + 4] == "0.5"
+        assert "AS" in args
+        assert "median_price" in args
+
 
 class TestTranslatorVectorSearch:
     """Tests for vector search translation."""

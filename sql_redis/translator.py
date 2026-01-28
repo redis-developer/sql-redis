@@ -261,7 +261,11 @@ class Translator:
                 if agg.function.upper() == "COUNT":
                     args.append("0")
                 elif agg.field:
-                    args.extend(["1", f"@{agg.field}"])
+                    # Calculate nargs: 1 for field + number of extra args
+                    nargs = 1 + len(agg.extra_args)
+                    args.append(str(nargs))
+                    args.append(f"@{agg.field}")
+                    args.extend(agg.extra_args)
                 else:
                     args.append("0")
                 if agg.alias:
@@ -276,7 +280,11 @@ class Translator:
                 if agg.function.upper() == "COUNT":
                     args.append("0")
                 elif agg.field:
-                    args.extend(["1", f"@{agg.field}"])
+                    # Calculate nargs: 1 for field + number of extra args
+                    nargs = 1 + len(agg.extra_args)
+                    args.append(str(nargs))
+                    args.append(f"@{agg.field}")
+                    args.extend(agg.extra_args)
                 else:
                     args.append("0")
                 # Always provide an alias
