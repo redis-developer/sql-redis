@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
@@ -15,6 +16,9 @@ class AggregationSpec:
     function: str
     field: str | None = None
     alias: str | None = None
+    extra_args: list[str] = dataclasses.field(
+        default_factory=list
+    )  # For reducers like QUANTILE
 
 
 @dataclass
@@ -49,14 +53,14 @@ class ParsedQuery:
     """Result of parsing a SQL query."""
 
     index: str = ""
-    fields: list[str] = field(default_factory=list)
-    conditions: list[Condition] = field(default_factory=list)
+    fields: list[str] = dataclasses.field(default_factory=list)
+    conditions: list[Condition] = dataclasses.field(default_factory=list)
     boolean_operator: str = "AND"
-    aggregations: list[AggregationSpec] = field(default_factory=list)
-    computed_fields: list[ComputedField] = field(default_factory=list)
+    aggregations: list[AggregationSpec] = dataclasses.field(default_factory=list)
+    computed_fields: list[ComputedField] = dataclasses.field(default_factory=list)
     vector_search: VectorSearchSpec | None = None
-    groupby_fields: list[str] = field(default_factory=list)
-    orderby_fields: list[tuple[str, str]] = field(
+    groupby_fields: list[str] = dataclasses.field(default_factory=list)
+    orderby_fields: list[tuple[str, str]] = dataclasses.field(
         default_factory=list
     )  # (field, ASC|DESC)
     limit: int | None = None
@@ -150,9 +154,28 @@ class SQLParser:
             result.fields.append(expression.name)
         elif isinstance(expression, exp.Star):
             result.fields.append("*")
-        elif isinstance(expression, (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)):
+        elif isinstance(
+            expression,
+            (
+                exp.Count,
+                exp.Sum,
+                exp.Avg,
+                exp.Min,
+                exp.Max,
+                exp.Stddev,
+                exp.Variance,
+                exp.FirstValue,
+                exp.ArrayAgg,
+            ),
+        ):
             # Aggregation function
+            # Map sqlglot function names to Redis reducer names
             func_name = expression.key.upper()
+            redis_func_map = {
+                "FIRSTVALUE": "FIRST_VALUE",
+                "ARRAYAGG": "TOLIST",
+            }
+            func_name = redis_func_map.get(func_name, func_name)
             field_name = None
             # Get the field being aggregated (if any)
             if expression.this:
@@ -184,10 +207,34 @@ class SQLParser:
             # - Distance: L2/Euclidean distance
             # - CosineDistance: cosine_distance() function
             self._process_vector_distance(expression, result, alias)
+        elif isinstance(expression, exp.Quantile):
+            # QUANTILE(field, quantile_value) -> REDUCE QUANTILE 2 @field quantile_value
+            field_name = None
+            if expression.this and isinstance(expression.this, exp.Column):
+                field_name = expression.this.name
+            quantile_value = None
+            if expression.args.get("quantile"):
+                quantile_value = str(expression.args["quantile"].this)
+            extra_args = [quantile_value] if quantile_value else []
+            result.aggregations.append(
+                AggregationSpec(
+                    function="QUANTILE",
+                    field=field_name,
+                    alias=alias,
+                    extra_args=extra_args,
+                )
+            )
         elif isinstance(expression, exp.Anonymous):
             # Custom function call (e.g., vector_distance) - check before exp.Func
             # since Anonymous is a subclass of Func
             func_name = expression.name.lower()
+            # Redis-specific reducer functions that sqlglot doesn't recognize
+            redis_reducers = {
+                "count_distinct",
+                "count_distinctish",
+                "quantile",
+                "random_sample",
+            }
             if func_name == "vector_distance":
                 # Extract the vector field name from first argument
                 if expression.expressions:
@@ -198,6 +245,26 @@ class SQLParser:
                             field=field_name,
                             alias=alias or func_name,
                         )
+            elif func_name in redis_reducers:
+                # Redis-specific reducer functions
+                field_name = None
+                reducer_extra_args: list[str] = []
+                if expression.expressions:
+                    first_arg = expression.expressions[0]
+                    if isinstance(first_arg, exp.Column):
+                        field_name = first_arg.name
+                    # Extract additional arguments (e.g., quantile value for QUANTILE)
+                    for arg in expression.expressions[1:]:
+                        if isinstance(arg, exp.Literal):
+                            reducer_extra_args.append(str(arg.this))
+                result.aggregations.append(
+                    AggregationSpec(
+                        function=func_name.upper(),
+                        field=field_name,
+                        alias=alias,
+                        extra_args=reducer_extra_args,
+                    )
+                )
             else:
                 # Other custom functions - treat as computed field
                 expr_str = expression.sql()

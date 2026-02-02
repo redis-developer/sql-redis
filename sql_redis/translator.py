@@ -189,11 +189,17 @@ class Translator:
             args.append("2")
             params["vector"] = None  # Placeholder for vector bytes
 
-        # RETURN clause
-        if parsed.fields and parsed.fields != ["*"]:
+        # RETURN clause - include vector distance alias if present
+        return_fields = list(parsed.fields) if parsed.fields else []
+        if analyzed.vector_search and analyzed.vector_search.alias:
+            # Add vector distance alias to return fields (like VectorQuery with return_score=True)
+            if analyzed.vector_search.alias not in return_fields:
+                return_fields.append(analyzed.vector_search.alias)
+
+        if return_fields and return_fields != ["*"]:
             args.append("RETURN")
-            args.append(str(len(parsed.fields)))
-            args.extend(parsed.fields)
+            args.append(str(len(return_fields)))
+            args.extend(return_fields)
 
         # SORTBY
         if parsed.orderby_fields:
@@ -251,8 +257,15 @@ class Translator:
             for agg in analyzed.aggregations:
                 args.append("REDUCE")
                 args.append(agg.function.upper())
-                if agg.field:
-                    args.extend(["1", f"@{agg.field}"])
+                # COUNT always takes 0 arguments in Redis
+                if agg.function.upper() == "COUNT":
+                    args.append("0")
+                elif agg.field:
+                    # Calculate nargs: 1 for field + number of extra args
+                    nargs = 1 + len(agg.extra_args)
+                    args.append(str(nargs))
+                    args.append(f"@{agg.field}")
+                    args.extend(agg.extra_args)
                 else:
                     args.append("0")
                 if agg.alias:
@@ -263,8 +276,15 @@ class Translator:
             for agg in analyzed.aggregations:
                 args.append("REDUCE")
                 args.append(agg.function.upper())
-                if agg.field:
-                    args.extend(["1", f"@{agg.field}"])
+                # COUNT always takes 0 arguments in Redis
+                if agg.function.upper() == "COUNT":
+                    args.append("0")
+                elif agg.field:
+                    # Calculate nargs: 1 for field + number of extra args
+                    nargs = 1 + len(agg.extra_args)
+                    args.append(str(nargs))
+                    args.append(f"@{agg.field}")
+                    args.extend(agg.extra_args)
                 else:
                     args.append("0")
                 # Always provide an alias
