@@ -2,6 +2,48 @@
 
 from __future__ import annotations
 
+import warnings
+
+# Redis default stopwords - these are not indexed by default
+# See: https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/stopwords/
+REDIS_DEFAULT_STOPWORDS = frozenset(
+    {
+        "a",
+        "is",
+        "the",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "for",
+        "if",
+        "in",
+        "into",
+        "it",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "such",
+        "that",
+        "their",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "to",
+        "was",
+        "will",
+        "with",
+    }
+)
+
 
 class QueryBuilder:
     """Builds RediSearch query syntax from conditions."""
@@ -42,8 +84,27 @@ class QueryBuilder:
             # Wrap with % for fuzzy matching
             search_value = f"%{value}%"
         elif " " in value:
-            # Phrase search - wrap in quotes
-            search_value = f'"{value}"'
+            # Phrase search - filter stopwords and wrap in quotes
+            words = value.split()
+            removed_stopwords = [
+                w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
+            ]
+            filtered_words = [
+                w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS
+            ]
+
+            if removed_stopwords:
+                warnings.warn(
+                    f"Stopwords {removed_stopwords} were removed from phrase search '{value}'. "
+                    "By default, Redis does not index stopwords. "
+                    "To include stopwords in your index, create it with STOPWORDS 0.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            # Use filtered phrase, or original if all words were stopwords
+            phrase = " ".join(filtered_words) if filtered_words else value
+            search_value = f'"{phrase}"'
         else:
             search_value = value
 
