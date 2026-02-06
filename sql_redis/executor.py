@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from typing import Any
 
 import redis
 
@@ -27,18 +29,88 @@ class Executor:
         self._schema_registry = schema_registry
         self._translator = Translator(schema_registry)
 
+    def _substitute_params(self, sql: str, params: dict[str, Any]) -> str:
+        """Substitute parameter placeholders in SQL with actual values.
+
+        Uses token-based approach: splits SQL on :param patterns, then rebuilds
+        with substituted values. This approach solves two critical bugs:
+
+        1. PARTIAL MATCHING BUG: Prevents :id from matching inside :product_id
+           by treating each :identifier as a complete token
+
+        2. QUOTE ESCAPING BUG: Properly escapes single quotes in string values
+           using SQL standard (single quote -> double single quote)
+
+        Args:
+            sql: The SQL string with :param placeholders.
+            params: Dictionary mapping parameter names to values.
+
+        Returns:
+            SQL string with parameters substituted.
+
+        Implementation Details:
+            - Uses regex to split on parameter patterns: :[a-zA-Z_][a-zA-Z0-9_]*
+            - Keeps delimiters (the :param tokens) in the split result
+            - Iterates through tokens, substituting matched parameters
+            - String values are wrapped in single quotes with proper escaping
+            - Numeric values are converted to strings
+            - Bytes values (e.g., vectors) are NOT substituted here
+
+        Known Limitations:
+            - Colons in string literals: SQL like "WHERE x = 'test:value'" would
+              theoretically match :value as a parameter. However, this is not a
+              practical issue because:
+              1. Users pass values via parameters, not hardcoded in SQL
+              2. The translator has its own handling of string literals
+              3. No real-world use cases have been identified
+            - Parameter names are case-sensitive (:id != :ID)
+            - Only handles int, float, str types; other types keep placeholder
+        """
+        if not params:
+            return sql
+
+        # Split SQL on :param patterns, keeping the delimiters
+        # Pattern matches : followed by valid identifier:
+        #   [a-zA-Z_]       - First char must be letter or underscore
+        #   [a-zA-Z0-9_]*   - Subsequent chars can be alphanumeric or underscore
+        # This prevents partial matching: :id and :product_id are separate tokens
+        tokens = re.split(r"(:[a-zA-Z_][a-zA-Z0-9_]*)", sql)
+
+        result = []
+        for token in tokens:
+            if token.startswith(":"):
+                # This is a parameter placeholder
+                key = token[1:]  # Remove leading :
+                if key in params:
+                    value = params[key]
+                    if isinstance(value, (int, float)):
+                        # Numeric values: convert to string
+                        result.append(str(value))
+                    elif isinstance(value, str):
+                        # String values: wrap in quotes and escape single quotes
+                        # SQL standard: ' -> '' (double single quote)
+                        # This fixes the quote escaping bug
+                        escaped = value.replace("'", "''")
+                        result.append(f"'{escaped}'")
+                    else:
+                        # Other types (bytes, None, bool, list, etc.):
+                        # Keep placeholder as-is (handled elsewhere or unsupported)
+                        result.append(token)
+                else:
+                    # Parameter not provided: keep placeholder as-is
+                    result.append(token)
+            else:
+                # Not a parameter: keep as-is
+                result.append(token)
+
+        return "".join(result)
+
     def execute(self, sql: str, *, params: dict | None = None) -> QueryResult:
         """Execute a SQL query and return results."""
         params = params or {}
 
-        # Substitute non-bytes params in SQL
-        for key, value in params.items():
-            placeholder = f":{key}"
-            if isinstance(value, (int, float)):
-                sql = sql.replace(placeholder, str(value))
-            elif isinstance(value, str):
-                sql = sql.replace(placeholder, f"'{value}'")
-            # bytes (vectors) are handled via Redis PARAMS
+        # Substitute non-bytes params in SQL using token-based approach
+        sql = self._substitute_params(sql, params)
 
         # Translate SQL to Redis command
         translated = self._translator.translate(sql)
