@@ -5,7 +5,7 @@ These tests verify that parameter substitution correctly handles:
 2. Quote escaping bug: Single quotes in values should be SQL-escaped
 3. Edge cases: Multiple occurrences, similar names, special characters
 
-Following TDD approach: These tests should FAIL initially, demonstrating the bugs exist.
+Following a TDD approach: These tests were written to fail when the bugs were present and now verify that the fixes work correctly and prevent regressions.
 """
 
 import pytest
