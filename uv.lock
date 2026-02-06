@@ -1014,7 +1014,7 @@ wheels = [
 
 [[package]]
 name = "sql-redis"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "redis", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
