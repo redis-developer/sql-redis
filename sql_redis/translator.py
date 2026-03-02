@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
 from sql_redis.parser import Condition, ParsedQuery, SQLParser
 from sql_redis.query_builder import QueryBuilder
-from sql_redis.schema import SchemaRegistry
+from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
 
 @dataclass
@@ -34,11 +34,13 @@ class TranslatedQuery:
 class Translator:
     """Translates SQL queries to Redis FT.SEARCH/FT.AGGREGATE commands."""
 
-    def __init__(self, schema_registry: SchemaRegistry):
+    def __init__(self, schema_registry: SchemaRegistry | AsyncSchemaRegistry) -> None:
         """Initialize translator with schema registry.
 
         Args:
-            schema_registry: Registry containing index schemas.
+            schema_registry: Registry containing index schemas. Can be either
+                sync (SchemaRegistry) or async (AsyncSchemaRegistry) - only
+                the sync get_schema() method is used.
         """
         self._schema_registry = schema_registry
         self._parser = SQLParser()

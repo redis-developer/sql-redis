@@ -3,7 +3,7 @@
 import pytest
 import redis
 
-from sql_redis.schema import SchemaRegistry
+from sql_redis.schema import SchemaRegistry, _parse_schema_from_info
 
 
 def _create_test_indexes(redis_client: redis.Redis) -> list[str]:
@@ -222,20 +222,16 @@ class TestSchemaRegistryEmptyServer:
 class TestSchemaRegistryParsing:
     """Tests for schema parsing edge cases."""
 
-    def test_parse_schema_no_attributes_section(self, redis_client: redis.Redis):
+    def test_parse_schema_no_attributes_section(self):
         """_parse_schema_from_info handles response without attributes."""
-        registry = SchemaRegistry(redis_client)
-
         # FT.INFO response without 'attributes' key
         fake_info = ["index_name", "test", "other_key", "value"]
-        schema = registry._parse_schema_from_info(fake_info)
+        schema = _parse_schema_from_info(fake_info)
 
         assert schema == {}
 
-    def test_parse_schema_incomplete_attribute(self, redis_client: redis.Redis):
+    def test_parse_schema_incomplete_attribute(self):
         """_parse_schema_from_info handles attribute without type."""
-        registry = SchemaRegistry(redis_client)
-
         # FT.INFO response with attribute but missing type
         fake_info = [
             "attributes",
@@ -244,7 +240,7 @@ class TestSchemaRegistryParsing:
                 ["identifier", "field2", "attribute", "field2", "type", "TEXT"],
             ],
         ]
-        schema = registry._parse_schema_from_info(fake_info)
+        schema = _parse_schema_from_info(fake_info)
 
         # Only field2 should be captured (field1 has no type)
         assert schema == {"field2": "TEXT"}
