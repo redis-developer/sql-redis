@@ -22,8 +22,8 @@ executor = Executor(client, registry)
 
 # Simple query
 result = executor.execute("""
-    SELECT title, price 
-    FROM products 
+    SELECT title, price
+    FROM products
     WHERE category = 'electronics' AND price < 500
     ORDER BY price ASC
     LIMIT 10
@@ -164,6 +164,34 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [ ] DISTINCT
 - [ ] GEO field queries
 - [ ] Index creation from SQL (CREATE INDEX)
+- [ ] DATE/DATETIME literal parsing (use NUMERIC with Unix timestamps)
+
+### DATE/DATETIME Handling
+
+Redis does not have a native DATE field type. Dates should be stored as:
+- **NUMERIC fields** with Unix timestamps (recommended for range queries)
+- **TAG fields** for exact date matching
+
+**Current workaround** - dates work with NUMERIC fields:
+
+```sql
+-- Date range query (Unix timestamps)
+SELECT * FROM events WHERE created_at > 1704067200 AND created_at < 1706745600
+
+-- BETWEEN for date ranges
+SELECT * FROM events WHERE created_at BETWEEN 1704067200 AND 1706745600
+```
+
+**Converting dates to timestamps in Python:**
+
+```python
+from datetime import datetime
+
+date_str = "2024-01-01"
+timestamp = int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
+sql = f"SELECT * FROM events WHERE created_at > {timestamp}"
+```
+
 
 ## Development
 
