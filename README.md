@@ -155,6 +155,7 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [x] Vector KNN search: `vector_distance(field, :param)`
 - [x] Hybrid search (filters + vector)
 - [x] Full-text search: `LIKE 'prefix%'` (prefix), `fulltext(field, 'terms')` function
+- [x] GEO field queries with full operator support (see below)
 
 ## What's Not Implemented (Yet...)
 
@@ -162,8 +163,95 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [ ] Subqueries
 - [ ] HAVING clause
 - [ ] DISTINCT
-- [ ] GEO field queries
+- [ ] DATE/DATETIME support (use NUMERIC with Unix timestamps)
 - [ ] Index creation from SQL (CREATE INDEX)
+
+### GEO Field Support
+
+GEO fields are **fully implemented** with standard SQL-like syntax:
+
+| Feature | Status |
+|---------|--------|
+| Coordinate order | ✅ `POINT(lat, lon)` — latitude first (Google Maps style) |
+| Default unit | ✅ Meters (`m`) — SQL standard |
+| All operators | ✅ `<`, `<=`, `>`, `>=`, `BETWEEN` |
+| Distance calculation | ✅ `geo_distance()` in SELECT clause |
+| Combined filters | ✅ GEO + TEXT/TAG/NUMERIC |
+
+#### Coordinate Order: `POINT(lat, lon)`
+
+Use **latitude first**, matching Google Maps and GPS conventions:
+
+```sql
+-- San Francisco coordinates: 37.7749°N, 122.4194°W
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194)) < 5000
+```
+
+> **Note:** Internally, coordinates are swapped to Redis's `lon, lat` format. You don't need to worry about this.
+
+#### Units
+
+| Unit | Code | Example |
+|------|------|---------|
+| Meters | `m` | `geo_distance(location, POINT(37.7749, -122.4194)) < 5000` |
+| Kilometers | `km` | `geo_distance(location, POINT(37.7749, -122.4194), 'km') < 5` |
+| Miles | `mi` | `geo_distance(location, POINT(37.7749, -122.4194), 'mi') < 3` |
+| Feet | `ft` | `geo_distance(location, POINT(37.7749, -122.4194), 'ft') < 16400` |
+
+**Default is meters** when no unit is specified.
+
+#### Operators
+
+All comparison operators are supported:
+
+```sql
+-- Less than (uses optimized GEOFILTER)
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194)) < 5000
+
+-- Less than or equal (uses optimized GEOFILTER)
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194)) <= 5000
+
+-- Greater than (uses FT.AGGREGATE with FILTER)
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194)) > 100000
+
+-- Greater than or equal (uses FT.AGGREGATE with FILTER)
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194)) >= 100000
+
+-- Between (uses FT.AGGREGATE with FILTER)
+SELECT name FROM stores WHERE geo_distance(location, POINT(37.7749, -122.4194), 'km') BETWEEN 10 AND 100
+```
+
+#### Distance Calculation in SELECT
+
+Calculate distances for all results using `geo_distance()` in the SELECT clause:
+
+```sql
+-- Get distance to each store (returns meters)
+SELECT name, geo_distance(location, POINT(37.7749, -122.4194)) AS distance
+FROM stores
+
+-- With explicit unit
+SELECT name, geo_distance(location, POINT(37.7749, -122.4194), 'km') AS distance_km
+FROM stores
+```
+
+#### Combined Filters
+
+Combine GEO filters with other field types:
+
+```sql
+-- GEO + TAG filter
+SELECT name FROM stores
+WHERE category = 'retail' AND geo_distance(location, POINT(37.7749, -122.4194)) < 5000
+
+-- GEO + NUMERIC filter
+SELECT name FROM stores
+WHERE rating >= 4.0 AND geo_distance(location, POINT(37.7749, -122.4194), 'mi') < 10
+
+-- GEO + TEXT filter
+SELECT name FROM stores
+WHERE name = 'Downtown' AND geo_distance(location, POINT(37.7749, -122.4194)) < 10000
+```
 
 ## Development
 
