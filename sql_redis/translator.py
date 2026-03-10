@@ -81,8 +81,7 @@ class Translator:
 
         # Check if any geo conditions require FT.AGGREGATE (>, >=, BETWEEN)
         geo_requires_aggregate = any(
-            geo.operator in (">", ">=", "BETWEEN")
-            for geo in parsed.geo_conditions
+            geo.operator in (">", ">=", "BETWEEN") for geo in parsed.geo_conditions
         )
 
         # Determine if we need FT.AGGREGATE
@@ -260,7 +259,8 @@ class Translator:
 
         # Identify geo conditions that need FILTER (>, >=, BETWEEN)
         geo_filter_conditions = [
-            geo for geo in parsed.geo_conditions
+            geo
+            for geo in parsed.geo_conditions
             if geo.operator in (">", ">=", "BETWEEN")
         ]
 
@@ -316,7 +316,7 @@ class Translator:
                 as_idx = rest.rfind(" AS ")
                 if as_idx != -1:
                     expr_part = rest[:as_idx].strip('"')
-                    alias_part = rest[as_idx + 4:]
+                    alias_part = rest[as_idx + 4 :]
                     args.extend(["APPLY", expr_part, "AS", alias_part])
 
         # APPLY and FILTER for geo_distance() with >, >=, BETWEEN operators

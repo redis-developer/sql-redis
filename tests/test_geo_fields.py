@@ -16,8 +16,21 @@ def geo_index(redis_client: redis.Redis) -> str:
     except redis.ResponseError:
         pass
     redis_client.execute_command(
-        "FT.CREATE", index_name, "ON", "HASH", "PREFIX", "1", "store:",
-        "SCHEMA", "name", "TEXT", "SORTABLE", "category", "TAG", "location", "GEO",
+        "FT.CREATE",
+        index_name,
+        "ON",
+        "HASH",
+        "PREFIX",
+        "1",
+        "store:",
+        "SCHEMA",
+        "name",
+        "TEXT",
+        "SORTABLE",
+        "category",
+        "TAG",
+        "location",
+        "GEO",
     )
     return index_name
 
@@ -123,8 +136,16 @@ class TestGeoIntegration:
     def geo_data(self, redis_client, geo_index):
         """Populate geo index with test store locations."""
         stores = [
-            {"name": "SF Downtown", "category": "retail", "location": "-122.4194,37.7749"},
-            {"name": "NYC Times Square", "category": "retail", "location": "-73.9857,40.7580"},
+            {
+                "name": "SF Downtown",
+                "category": "retail",
+                "location": "-122.4194,37.7749",
+            },
+            {
+                "name": "NYC Times Square",
+                "category": "retail",
+                "location": "-73.9857,40.7580",
+            },
         ]
         for i, store in enumerate(stores):
             redis_client.hset(f"store:{i+1}", mapping=store)
@@ -133,9 +154,15 @@ class TestGeoIntegration:
     def test_raw_geofilter_works(self, redis_client, geo_data):
         """Verify raw GEOFILTER command works with Redis."""
         result = redis_client.execute_command(
-            "FT.SEARCH", "test_geo_stores", "*",
-            "GEOFILTER", "location", "-122.4194", "37.7749", "50", "km"
+            "FT.SEARCH",
+            "test_geo_stores",
+            "*",
+            "GEOFILTER",
+            "location",
+            "-122.4194",
+            "37.7749",
+            "50",
+            "km",
         )
         # Should return SF Downtown (within 50km of SF)
         assert result[0] >= 1  # At least one result
-

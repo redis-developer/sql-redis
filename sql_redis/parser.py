@@ -86,7 +86,9 @@ class ParsedQuery:
     fields: list[str] = dataclasses.field(default_factory=list)
     conditions: list[Condition] = dataclasses.field(default_factory=list)
     geo_conditions: list[GeoDistanceCondition] = dataclasses.field(default_factory=list)
-    geo_distance_selects: list[GeoDistanceSelect] = dataclasses.field(default_factory=list)
+    geo_distance_selects: list[GeoDistanceSelect] = dataclasses.field(
+        default_factory=list
+    )
     boolean_operator: str = "AND"
     aggregations: list[AggregationSpec] = dataclasses.field(default_factory=list)
     computed_fields: list[ComputedField] = dataclasses.field(default_factory=list)
@@ -434,7 +436,10 @@ class SQLParser:
                 # Second arg: POINT(lon, lat) - matches Redis's native format
                 if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
                     point_func = func_args[1]
-                    if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
+                    if (
+                        point_func.name.upper() == "POINT"
+                        and len(point_func.expressions) >= 2
+                    ):
                         # POINT(lon, lat) - no swap needed, matches Redis
                         geo_lon = self._extract_literal_value(point_func.expressions[0])
                         geo_lat = self._extract_literal_value(point_func.expressions[1])
@@ -473,7 +478,10 @@ class SQLParser:
             else:
                 result.conditions.append(
                     Condition(
-                        field=field_name, operator=operator, value=value, negated=negated
+                        field=field_name,
+                        operator=operator,
+                        value=value,
+                        negated=negated,
                     )
                 )
 
@@ -501,7 +509,10 @@ class SQLParser:
                 # Second arg: POINT(lon, lat) - matches Redis's native format
                 if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
                     point_func = func_args[1]
-                    if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
+                    if (
+                        point_func.name.upper() == "POINT"
+                        and len(point_func.expressions) >= 2
+                    ):
                         # POINT(lon, lat) - no swap needed, matches Redis
                         geo_lon = self._extract_literal_value(point_func.expressions[0])
                         geo_lat = self._extract_literal_value(point_func.expressions[1])
