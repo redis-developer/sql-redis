@@ -52,8 +52,8 @@ class Condition:
 class GeoDistanceCondition:
     """A GEO distance condition with coordinates.
 
-    Represents: geo_distance(field, POINT(lat, lon), unit) < radius
-    User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+    Represents: geo_distance(field, POINT(lon, lat), unit) < radius
+    Uses POINT(lon, lat) order to match Redis's native format.
     """
 
     field: str
@@ -68,7 +68,7 @@ class GeoDistanceCondition:
 class GeoDistanceSelect:
     """A geo_distance() call in SELECT clause for FT.AGGREGATE APPLY.
 
-    User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+    Uses POINT(lon, lat) order to match Redis's native format.
     """
 
     field: str
@@ -349,13 +349,13 @@ class SQLParser:
         if isinstance(func_args[0], exp.Column):
             field_name = func_args[0].name
 
-        # Second arg: POINT(lat, lon) - user provides lat first, we swap internally
+        # Second arg: POINT(lon, lat) - matches Redis's native format
         if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
             point_func = func_args[1]
             if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
-                # User provides POINT(lat, lon), we store as (lon, lat) for Redis
-                geo_lat = self._extract_literal_value(point_func.expressions[0])
-                geo_lon = self._extract_literal_value(point_func.expressions[1])
+                # POINT(lon, lat) - no swap needed, matches Redis
+                geo_lon = self._extract_literal_value(point_func.expressions[0])
+                geo_lat = self._extract_literal_value(point_func.expressions[1])
 
         # Third arg (optional): unit
         if len(func_args) >= 3:
@@ -431,13 +431,13 @@ class SQLParser:
                 # First arg: field name
                 if isinstance(func_args[0], exp.Column):
                     field_name = func_args[0].name
-                # Second arg: POINT(lat, lon) - user provides lat first, we swap internally
+                # Second arg: POINT(lon, lat) - matches Redis's native format
                 if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
                     point_func = func_args[1]
                     if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
-                        # User provides POINT(lat, lon), we store as (lon, lat) for Redis
-                        geo_lat = self._extract_literal_value(point_func.expressions[0])
-                        geo_lon = self._extract_literal_value(point_func.expressions[1])
+                        # POINT(lon, lat) - no swap needed, matches Redis
+                        geo_lon = self._extract_literal_value(point_func.expressions[0])
+                        geo_lat = self._extract_literal_value(point_func.expressions[1])
                 # Third arg (optional): unit
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])
@@ -498,13 +498,13 @@ class SQLParser:
                 # First arg: field name
                 if isinstance(func_args[0], exp.Column):
                     field_name = func_args[0].name
-                # Second arg: POINT(lat, lon) - user provides lat first
+                # Second arg: POINT(lon, lat) - matches Redis's native format
                 if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
                     point_func = func_args[1]
                     if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
-                        # User provides POINT(lat, lon), we store as (lon, lat) for Redis
-                        geo_lat = self._extract_literal_value(point_func.expressions[0])
-                        geo_lon = self._extract_literal_value(point_func.expressions[1])
+                        # POINT(lon, lat) - no swap needed, matches Redis
+                        geo_lon = self._extract_literal_value(point_func.expressions[0])
+                        geo_lat = self._extract_literal_value(point_func.expressions[1])
                 # Third arg (optional): unit
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])

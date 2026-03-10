@@ -179,19 +179,19 @@ class TestSQLParserWhereClause:
     def test_parse_geo_distance_comparison(self):
         """Parse WHERE with geo_distance function comparison.
 
-        Note: User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+        Note: POINT(lon, lat) matches Redis's native format.
         """
         parser = SQLParser()
-        # User writes POINT(lat, lon) - latitude first
+        # POINT(lon, lat) - matches Redis native format
         result = parser.parse(
-            "SELECT name FROM stores WHERE geo_distance(location, POINT(37.8, -122.4)) < 10"
+            "SELECT name FROM stores WHERE geo_distance(location, POINT(-122.4, 37.8)) < 10"
         )
 
         assert len(result.geo_conditions) == 1
         assert result.geo_conditions[0].field == "location"
         assert result.geo_conditions[0].operator == "<"
         assert result.geo_conditions[0].radius == 10.0
-        # Internally stored as (lon, lat) for Redis
+        # POINT(lon, lat) - matches Redis native format
         assert result.geo_conditions[0].lon == -122.4
         assert result.geo_conditions[0].lat == 37.8
 

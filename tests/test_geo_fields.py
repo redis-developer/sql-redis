@@ -33,21 +33,21 @@ def geo_translator(redis_client: redis.Redis, geo_index: str) -> Translator:
 class TestGeoDistanceLessThan:
     """Tests for geo_distance() < radius queries.
 
-    Note: User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+    Note: POINT(lon, lat) matches Redis's native format.
     """
 
     def test_geo_distance_generates_geofilter(self, geo_translator, geo_index):
         """geo_distance < radius should generate GEOFILTER."""
-        # User writes POINT(lat, lon) - latitude first
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4)) < 10"
+        # POINT(lon, lat) - matches Redis native format
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) < 10"
         result = geo_translator.translate(sql)
         assert result.command == "FT.SEARCH"
         assert "GEOFILTER" in result.args
 
     def test_geo_distance_with_km_unit(self, geo_translator, geo_index):
         """geo_distance with km unit."""
-        # User writes POINT(lat, lon) - latitude first
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4), 'km') < 50"
+        # POINT(lon, lat) - matches Redis native format
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8), 'km') < 50"
         result = geo_translator.translate(sql)
         assert "km" in " ".join(str(a) for a in result.args).lower()
 
@@ -57,16 +57,16 @@ class TestGeoWithOtherConditions:
 
     def test_geo_with_text_filter(self, geo_translator, geo_index):
         """GEO filter combined with TEXT search."""
-        # User writes POINT(lat, lon) - latitude first
-        sql = f"SELECT name FROM {geo_index} WHERE name = 'Downtown' AND geo_distance(location, POINT(37.8, -122.4)) < 10"
+        # POINT(lon, lat) - matches Redis native format
+        sql = f"SELECT name FROM {geo_index} WHERE name = 'Downtown' AND geo_distance(location, POINT(-122.4, 37.8)) < 10"
         result = geo_translator.translate(sql)
         assert "@name" in result.query_string
         assert "GEOFILTER" in result.args
 
     def test_geo_with_tag_filter(self, geo_translator, geo_index):
         """GEO filter combined with TAG filter."""
-        # User writes POINT(lat, lon) - latitude first
-        sql = f"SELECT name FROM {geo_index} WHERE category = 'retail' AND geo_distance(location, POINT(37.8, -122.4)) < 50"
+        # POINT(lon, lat) - matches Redis native format
+        sql = f"SELECT name FROM {geo_index} WHERE category = 'retail' AND geo_distance(location, POINT(-122.4, 37.8)) < 50"
         result = geo_translator.translate(sql)
         assert "@category:{retail}" in result.query_string
         assert "GEOFILTER" in result.args
@@ -77,8 +77,8 @@ class TestGeoDistanceInSelect:
 
     def test_geo_distance_in_select_generates_apply(self, geo_translator, geo_index):
         """SELECT geo_distance() AS dist should generate APPLY geodistance()."""
-        # User writes POINT(lat, lon) - latitude first
-        sql = f"SELECT name, geo_distance(location, POINT(37.8, -122.4)) AS dist FROM {geo_index}"
+        # POINT(lon, lat) - matches Redis native format
+        sql = f"SELECT name, geo_distance(location, POINT(-122.4, 37.8)) AS dist FROM {geo_index}"
         result = geo_translator.translate(sql)
         assert result.command == "FT.AGGREGATE"
         assert "APPLY" in result.args
@@ -89,28 +89,28 @@ class TestGeoDistanceOperators:
 
     def test_geo_distance_greater_than_uses_aggregate(self, geo_translator, geo_index):
         """geo_distance > radius should use FT.AGGREGATE with FILTER."""
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4)) > 5000"
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) > 5000"
         result = geo_translator.translate(sql)
         assert result.command == "FT.AGGREGATE"
         assert "FILTER" in result.args
 
     def test_geo_distance_greater_equal_uses_aggregate(self, geo_translator, geo_index):
         """geo_distance >= radius should use FT.AGGREGATE with FILTER."""
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4)) >= 5000"
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) >= 5000"
         result = geo_translator.translate(sql)
         assert result.command == "FT.AGGREGATE"
         assert "FILTER" in result.args
 
     def test_geo_distance_less_equal_uses_search(self, geo_translator, geo_index):
         """geo_distance <= radius should use FT.SEARCH with GEOFILTER."""
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4)) <= 5000"
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) <= 5000"
         result = geo_translator.translate(sql)
         assert result.command == "FT.SEARCH"
         assert "GEOFILTER" in result.args
 
     def test_geo_distance_between_uses_aggregate(self, geo_translator, geo_index):
         """geo_distance BETWEEN x AND y should use FT.AGGREGATE with FILTER."""
-        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(37.8, -122.4)) BETWEEN 1000 AND 5000"
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) BETWEEN 1000 AND 5000"
         result = geo_translator.translate(sql)
         assert result.command == "FT.AGGREGATE"
         assert "FILTER" in result.args
