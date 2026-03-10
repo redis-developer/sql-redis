@@ -177,16 +177,23 @@ class TestSQLParserWhereClause:
         assert result.conditions[0].negated is True
 
     def test_parse_geo_distance_comparison(self):
-        """Parse WHERE with geo_distance function comparison."""
+        """Parse WHERE with geo_distance function comparison.
+
+        Note: User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+        """
         parser = SQLParser()
+        # User writes POINT(lat, lon) - latitude first
         result = parser.parse(
-            "SELECT name FROM stores WHERE geo_distance(location, POINT(-122.4, 37.8)) < 10"
+            "SELECT name FROM stores WHERE geo_distance(location, POINT(37.8, -122.4)) < 10"
         )
 
-        assert len(result.conditions) == 1
-        assert result.conditions[0].field == "location"
-        assert result.conditions[0].operator == "GEO_DISTANCE_<"
-        assert result.conditions[0].value == 10
+        assert len(result.geo_conditions) == 1
+        assert result.geo_conditions[0].field == "location"
+        assert result.geo_conditions[0].operator == "<"
+        assert result.geo_conditions[0].radius == 10.0
+        # Internally stored as (lon, lat) for Redis
+        assert result.geo_conditions[0].lon == -122.4
+        assert result.geo_conditions[0].lat == 37.8
 
     def test_parse_less_than_or_equal(self):
         """Parse WHERE with <= comparison."""
@@ -399,8 +406,8 @@ class TestSQLParserEdgeCases:
             "SELECT * FROM stores WHERE geo_distance(location, POINT(0, 0)) > 100"
         )
 
-        assert result.conditions[0].operator == "GEO_DISTANCE_>"
-        assert result.conditions[0].value == 100
+        assert result.geo_conditions[0].operator == ">"
+        assert result.geo_conditions[0].radius == 100.0
 
     def test_parse_between_with_floats(self):
         """Parse BETWEEN with float values."""
@@ -469,8 +476,8 @@ class TestSQLParserEdgeCases:
             "SELECT * FROM stores WHERE geo_distance(location, POINT(0, 0)) <= 50"
         )
 
-        assert result.conditions[0].operator == "GEO_DISTANCE_<="
-        assert result.conditions[0].value == 50
+        assert result.geo_conditions[0].operator == "<="
+        assert result.geo_conditions[0].radius == 50.0
 
     def test_parse_geo_distance_gte(self):
         """Parse geo_distance with >= operator."""
@@ -479,8 +486,8 @@ class TestSQLParserEdgeCases:
             "SELECT * FROM stores WHERE geo_distance(location, POINT(0, 0)) >= 10"
         )
 
-        assert result.conditions[0].operator == "GEO_DISTANCE_>="
-        assert result.conditions[0].value == 10
+        assert result.geo_conditions[0].operator == ">="
+        assert result.geo_conditions[0].radius == 10.0
 
     def test_parse_subquery_from(self):
         """Parse FROM with subquery (finds inner table)."""
