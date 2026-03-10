@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
-from sql_redis.parser import Condition, ParsedQuery, SQLParser
+from sql_redis.parser import (
+    Condition,
+    GeoDistanceCondition,
+    GeoDistanceSelect,
+    ParsedQuery,
+    SQLParser,
+)
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
@@ -73,11 +79,19 @@ class Translator:
         """Build the Redis command from analyzed query."""
         parsed = analyzed.parsed
 
+        # Check if any geo conditions require FT.AGGREGATE (>, >=, BETWEEN)
+        geo_requires_aggregate = any(
+            geo.operator in (">", ">=", "BETWEEN")
+            for geo in parsed.geo_conditions
+        )
+
         # Determine if we need FT.AGGREGATE
         use_aggregate = (
             len(analyzed.aggregations) > 0
             or len(analyzed.groupby_fields) > 0
             or len(analyzed.computed_fields) > 0
+            or len(parsed.geo_distance_selects) > 0  # geo_distance() in SELECT
+            or geo_requires_aggregate  # geo_distance with >, >=, BETWEEN
         )
 
         # Build query string from conditions
@@ -191,6 +205,11 @@ class Translator:
             args.append("2")
             params["vector"] = None  # Placeholder for vector bytes
 
+        # GEOFILTER clause for geo_distance conditions (only < and <= operators)
+        for geo_cond in parsed.geo_conditions:
+            if geo_cond.operator in ("<", "<="):
+                args.extend(self._build_geo_filter_args(geo_cond))
+
         # RETURN clause - include vector distance alias if present
         return_fields = list(parsed.fields) if parsed.fields else []
         if analyzed.vector_search and analyzed.vector_search.alias:
@@ -221,12 +240,29 @@ class Translator:
             params=params,
         )
 
+    def _build_geo_filter_args(self, geo_cond: GeoDistanceCondition) -> list[str]:
+        """Build GEOFILTER args from a GeoDistanceCondition."""
+        return [
+            "GEOFILTER",
+            geo_cond.field,
+            str(geo_cond.lon),
+            str(geo_cond.lat),
+            str(geo_cond.radius),
+            geo_cond.unit,
+        ]
+
     def _build_aggregate(
         self, analyzed: AnalyzedQuery, query_string: str
     ) -> TranslatedQuery:
         """Build FT.AGGREGATE command."""
         parsed = analyzed.parsed
         args: list[str] = []
+
+        # Identify geo conditions that need FILTER (>, >=, BETWEEN)
+        geo_filter_conditions = [
+            geo for geo in parsed.geo_conditions
+            if geo.operator in (">", ">=", "BETWEEN")
+        ]
 
         # LOAD fields if needed
         load_fields = set()
@@ -235,6 +271,18 @@ class Translator:
                 load_fields.add(agg.field)
         for field_name in analyzed.groupby_fields:
             load_fields.add(field_name)
+        # Load geo fields used in geo_distance() SELECT expressions
+        for geo_select in parsed.geo_distance_selects:
+            load_fields.add(geo_select.field)
+        # Load geo fields used in geo_distance() WHERE with >, >=, BETWEEN
+        for geo_cond in geo_filter_conditions:
+            load_fields.add(geo_cond.field)
+        # Load regular SELECT fields for FT.AGGREGATE
+        if parsed.fields and parsed.fields != ["*"]:
+            for field in parsed.fields:
+                # Skip computed fields (they have aliases from geo_distance)
+                if field not in [gs.alias for gs in parsed.geo_distance_selects]:
+                    load_fields.add(field)
 
         if load_fields:
             args.append("LOAD")
@@ -248,6 +296,39 @@ class Translator:
                 computed.expression, analyzed.field_types
             )
             args.extend(["APPLY", expression, "AS", computed.alias])
+
+        # APPLY for geo_distance() in SELECT
+        for geo_select in parsed.geo_distance_selects:
+            apply_expr = self._query_builder.build_geo_distance_apply(
+                geo_select.field,
+                geo_select.lon,
+                geo_select.lat,
+                geo_select.alias,
+                geo_select.unit,
+            )
+            # build_geo_distance_apply returns 'APPLY "expr" AS alias'
+            # We need to split it into args
+            parts = apply_expr.split(" ", 1)  # ['APPLY', '"expr" AS alias']
+            if len(parts) == 2:
+                # Parse: '"expr" AS alias'
+                rest = parts[1]
+                # Find the AS keyword
+                as_idx = rest.rfind(" AS ")
+                if as_idx != -1:
+                    expr_part = rest[:as_idx].strip('"')
+                    alias_part = rest[as_idx + 4:]
+                    args.extend(["APPLY", expr_part, "AS", alias_part])
+
+        # APPLY and FILTER for geo_distance() with >, >=, BETWEEN operators
+        for i, geo_cond in enumerate(geo_filter_conditions):
+            # Create a unique alias for this geo distance calculation
+            geo_alias = f"__geo_dist_{i}"
+            # APPLY geodistance() to calculate distance
+            geo_expr = f"geodistance(@{geo_cond.field}, {geo_cond.lon}, {geo_cond.lat})"
+            args.extend(["APPLY", geo_expr, "AS", geo_alias])
+            # FILTER based on operator
+            filter_expr = self._build_geo_filter_expression(geo_cond, geo_alias)
+            args.extend(["FILTER", filter_expr])
 
         # GROUPBY
         if analyzed.groupby_fields:
@@ -311,6 +392,57 @@ class Translator:
             query_string=query_string,
             args=args,
         )
+
+    def _build_geo_filter_expression(
+        self, geo_cond: GeoDistanceCondition, alias: str
+    ) -> str:
+        """Build FILTER expression for geo distance comparison.
+
+        Args:
+            geo_cond: The geo distance condition with operator and radius.
+            alias: The alias for the calculated distance field.
+
+        Returns:
+            Filter expression string for Redis FILTER clause.
+        """
+        if geo_cond.operator == "BETWEEN":
+            # For BETWEEN, radius is a tuple (low, high)
+            if isinstance(geo_cond.radius, tuple) and len(geo_cond.radius) == 2:
+                low_m = self._convert_to_meters(geo_cond.radius[0], geo_cond.unit)
+                high_m = self._convert_to_meters(geo_cond.radius[1], geo_cond.unit)
+                return f"@{alias} >= {low_m} && @{alias} <= {high_m}"
+            else:
+                # Fallback - shouldn't happen
+                return f"@{alias} >= 0"
+
+        # Convert radius to meters if needed (geodistance() returns meters)
+        radius_m = self._convert_to_meters(geo_cond.radius, geo_cond.unit)
+
+        if geo_cond.operator == ">":
+            return f"@{alias} > {radius_m}"
+        elif geo_cond.operator == ">=":
+            return f"@{alias} >= {radius_m}"
+        else:
+            # Fallback for < and <= (shouldn't reach here normally)
+            return f"@{alias} < {radius_m}"
+
+    def _convert_to_meters(self, value: float, unit: str) -> float:
+        """Convert a distance value to meters.
+
+        Args:
+            value: The distance value.
+            unit: The unit (m, km, mi, ft).
+
+        Returns:
+            Distance in meters.
+        """
+        conversions = {
+            "m": 1.0,
+            "km": 1000.0,
+            "mi": 1609.344,
+            "ft": 0.3048,
+        }
+        return value * conversions.get(unit, 1.0)
 
     def _prefix_fields_in_expression(
         self, expression: str, schema: dict[str, str]

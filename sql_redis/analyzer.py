@@ -84,6 +84,10 @@ class Analyzer:
         for condition in parsed.conditions:
             referenced_fields.add(condition.field)
 
+        # Fields from geo_conditions
+        for geo_cond in parsed.geo_conditions:
+            referenced_fields.add(geo_cond.field)
+
         # Fields from aggregations
         for agg in parsed.aggregations:
             if agg.field:

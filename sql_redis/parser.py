@@ -49,12 +49,44 @@ class Condition:
 
 
 @dataclass
+class GeoDistanceCondition:
+    """A GEO distance condition with coordinates.
+
+    Represents: geo_distance(field, POINT(lat, lon), unit) < radius
+    User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+    """
+
+    field: str
+    lon: float
+    lat: float
+    radius: float | tuple[float, float]  # Single value or (low, high) for BETWEEN
+    operator: str  # '<', '<=', '>', '>=', 'BETWEEN'
+    unit: str = "m"  # m, km, mi, ft (default: meters)
+
+
+@dataclass
+class GeoDistanceSelect:
+    """A geo_distance() call in SELECT clause for FT.AGGREGATE APPLY.
+
+    User provides POINT(lat, lon), internally stored as (lon, lat) for Redis.
+    """
+
+    field: str
+    lon: float
+    lat: float
+    alias: str
+    unit: str = "m"  # m, km, mi, ft (default: meters)
+
+
+@dataclass
 class ParsedQuery:
     """Result of parsing a SQL query."""
 
     index: str = ""
     fields: list[str] = dataclasses.field(default_factory=list)
     conditions: list[Condition] = dataclasses.field(default_factory=list)
+    geo_conditions: list[GeoDistanceCondition] = dataclasses.field(default_factory=list)
+    geo_distance_selects: list[GeoDistanceSelect] = dataclasses.field(default_factory=list)
     boolean_operator: str = "AND"
     aggregations: list[AggregationSpec] = dataclasses.field(default_factory=list)
     computed_fields: list[ComputedField] = dataclasses.field(default_factory=list)
@@ -245,6 +277,9 @@ class SQLParser:
                             field=field_name,
                             alias=alias or func_name,
                         )
+            elif func_name == "geo_distance":
+                # geo_distance(field, POINT(lon, lat), unit) in SELECT
+                self._process_geo_distance_select(expression, result, alias)
             elif func_name in redis_reducers:
                 # Redis-specific reducer functions
                 field_name = None
@@ -297,6 +332,48 @@ class SQLParser:
                 alias=alias or "vector_distance",
             )
 
+    def _process_geo_distance_select(
+        self, expression, result: ParsedQuery, alias: str | None
+    ) -> None:
+        """Process geo_distance() in SELECT clause for FT.AGGREGATE APPLY."""
+        func_args = expression.expressions
+        if not func_args:
+            return
+
+        field_name = None
+        geo_lon = None
+        geo_lat = None
+        geo_unit = "m"  # Default to meters for geodistance()
+
+        # First arg: field name
+        if isinstance(func_args[0], exp.Column):
+            field_name = func_args[0].name
+
+        # Second arg: POINT(lat, lon) - user provides lat first, we swap internally
+        if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
+            point_func = func_args[1]
+            if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
+                # User provides POINT(lat, lon), we store as (lon, lat) for Redis
+                geo_lat = self._extract_literal_value(point_func.expressions[0])
+                geo_lon = self._extract_literal_value(point_func.expressions[1])
+
+        # Third arg (optional): unit
+        if len(func_args) >= 3:
+            unit_val = self._extract_literal_value(func_args[2])
+            if unit_val:
+                geo_unit = str(unit_val)
+
+        if field_name and geo_lon is not None and geo_lat is not None:
+            result.geo_distance_selects.append(
+                GeoDistanceSelect(
+                    field=field_name,
+                    lon=float(geo_lon),
+                    lat=float(geo_lat),
+                    alias=alias or "geo_distance",
+                    unit=geo_unit,
+                )
+            )
+
     def _process_where_clause(
         self, expression, result: ParsedQuery, negated: bool = False
     ) -> None:
@@ -337,19 +414,40 @@ class SQLParser:
         """Add a condition from a comparison expression."""
         field_name = None
         value = None
+        is_geo_distance = False
+        geo_lon = None
+        geo_lat = None
+        geo_unit = "m"  # Default to meters
 
         # Get field name from left side
         if isinstance(expression.this, exp.Column):
             field_name = expression.this.name
         elif isinstance(expression.this, exp.Anonymous):
-            # Function call like DISTANCE(location, POINT(...))
-            # Extract field from first argument
+            # Function call like geo_distance(location, POINT(...))
             func_name = expression.this.name.upper()
-            if expression.this.expressions:
-                first_arg = expression.this.expressions[0]
+            func_args = expression.this.expressions
+            if func_name == "GEO_DISTANCE" and func_args:
+                is_geo_distance = True
+                # First arg: field name
+                if isinstance(func_args[0], exp.Column):
+                    field_name = func_args[0].name
+                # Second arg: POINT(lat, lon) - user provides lat first, we swap internally
+                if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
+                    point_func = func_args[1]
+                    if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
+                        # User provides POINT(lat, lon), we store as (lon, lat) for Redis
+                        geo_lat = self._extract_literal_value(point_func.expressions[0])
+                        geo_lon = self._extract_literal_value(point_func.expressions[1])
+                # Third arg (optional): unit
+                if len(func_args) >= 3:
+                    unit_val = self._extract_literal_value(func_args[2])
+                    if unit_val:
+                        geo_unit = str(unit_val)
+            elif func_args:
+                # Other function calls
+                first_arg = func_args[0]
                 if isinstance(first_arg, exp.Column):
                     field_name = first_arg.name
-                    # Use function name as operator prefix
                     operator = f"{func_name}_{operator}"
 
         # Get value from right side
@@ -360,19 +458,58 @@ class SQLParser:
                 value = int(value) if "." not in str(value) else float(value)
 
         if field_name is not None:
-            result.conditions.append(
-                Condition(
-                    field=field_name, operator=operator, value=value, negated=negated
+            if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Create GeoDistanceCondition with extracted coordinates
+                result.geo_conditions.append(
+                    GeoDistanceCondition(
+                        field=field_name,
+                        lon=float(geo_lon),
+                        lat=float(geo_lat),
+                        radius=float(value) if value else 0.0,
+                        operator=operator,
+                        unit=geo_unit,
+                    )
                 )
-            )
+            else:
+                result.conditions.append(
+                    Condition(
+                        field=field_name, operator=operator, value=value, negated=negated
+                    )
+                )
 
     def _add_between_condition(
         self, expression, result: ParsedQuery, negated: bool
     ) -> None:
         """Add a BETWEEN condition."""
         field_name = None
+        is_geo_distance = False
+        geo_lon = None
+        geo_lat = None
+        geo_unit = "m"  # Default to meters
+
         if isinstance(expression.this, exp.Column):
             field_name = expression.this.name
+        elif isinstance(expression.this, exp.Anonymous):
+            # Function call like geo_distance(location, POINT(...))
+            func_name = expression.this.name.upper()
+            func_args = expression.this.expressions
+            if func_name == "GEO_DISTANCE" and func_args:
+                is_geo_distance = True
+                # First arg: field name
+                if isinstance(func_args[0], exp.Column):
+                    field_name = func_args[0].name
+                # Second arg: POINT(lat, lon) - user provides lat first
+                if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
+                    point_func = func_args[1]
+                    if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
+                        # User provides POINT(lat, lon), we store as (lon, lat) for Redis
+                        geo_lat = self._extract_literal_value(point_func.expressions[0])
+                        geo_lon = self._extract_literal_value(point_func.expressions[1])
+                # Third arg (optional): unit
+                if len(func_args) >= 3:
+                    unit_val = self._extract_literal_value(func_args[2])
+                    if unit_val:
+                        geo_unit = str(unit_val)
 
         low = expression.args.get("low")
         high = expression.args.get("high")
@@ -381,14 +518,27 @@ class SQLParser:
         high_val = self._extract_literal_value(high)
 
         if field_name is not None:
-            result.conditions.append(
-                Condition(
-                    field=field_name,
-                    operator="BETWEEN",
-                    value=(low_val, high_val),
-                    negated=negated,
+            if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Create GeoDistanceCondition with BETWEEN operator
+                result.geo_conditions.append(
+                    GeoDistanceCondition(
+                        field=field_name,
+                        lon=float(geo_lon),
+                        lat=float(geo_lat),
+                        radius=(float(low_val), float(high_val)),  # Tuple for BETWEEN
+                        operator="BETWEEN",
+                        unit=geo_unit,
+                    )
                 )
-            )
+            else:
+                result.conditions.append(
+                    Condition(
+                        field=field_name,
+                        operator="BETWEEN",
+                        value=(low_val, high_val),
+                        negated=negated,
+                    )
+                )
 
     def _add_in_condition(self, expression, result: ParsedQuery, negated: bool) -> None:
         """Add an IN condition."""
@@ -431,10 +581,15 @@ class SQLParser:
                 )
 
     def _extract_literal_value(self, expression):
-        """Extract a Python value from a sqlglot Literal."""
+        """Extract a Python value from a sqlglot Literal or Neg expression."""
         if isinstance(expression, exp.Literal):
             value = expression.this
             if expression.is_number:
                 return int(value) if "." not in str(value) else float(value)
             return value
+        elif isinstance(expression, exp.Neg):
+            # Handle negative numbers: Neg(Literal(122.4)) -> -122.4
+            inner_value = self._extract_literal_value(expression.this)
+            if inner_value is not None:
+                return -inner_value
         return None
