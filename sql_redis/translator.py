@@ -416,6 +416,10 @@ class Translator:
                 return f"@{alias} >= 0"
 
         # Convert radius to meters if needed (geodistance() returns meters)
+        # At this point, radius is guaranteed to be a float (BETWEEN case handled above)
+        if isinstance(geo_cond.radius, tuple):
+            # Shouldn't reach here, but handle gracefully
+            return f"@{alias} >= 0"
         radius_m = self._convert_to_meters(geo_cond.radius, geo_cond.unit)
 
         if geo_cond.operator == ">":
