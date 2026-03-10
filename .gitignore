@@ -53,3 +53,7 @@ Thumbs.db
 # Project specific
 .ai/
 
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
