@@ -257,12 +257,9 @@ class Translator:
         parsed = analyzed.parsed
         args: list[str] = []
 
-        # Identify geo conditions that need FILTER (>, >=, BETWEEN)
-        geo_filter_conditions = [
-            geo
-            for geo in parsed.geo_conditions
-            if geo.operator in (">", ">=", "BETWEEN")
-        ]
+        # Identify geo conditions that need FILTER in AGGREGATE path
+        # All geo conditions need FILTER when using FT.AGGREGATE (including <, <=)
+        geo_filter_conditions = list(parsed.geo_conditions)
 
         # LOAD fields if needed
         load_fields = set()
@@ -299,25 +296,14 @@ class Translator:
 
         # APPLY for geo_distance() in SELECT
         for geo_select in parsed.geo_distance_selects:
-            apply_expr = self._query_builder.build_geo_distance_apply(
+            expr, alias = self._query_builder.build_geo_distance_apply(
                 geo_select.field,
                 geo_select.lon,
                 geo_select.lat,
                 geo_select.alias,
                 geo_select.unit,
             )
-            # build_geo_distance_apply returns 'APPLY "expr" AS alias'
-            # We need to split it into args
-            parts = apply_expr.split(" ", 1)  # ['APPLY', '"expr" AS alias']
-            if len(parts) == 2:
-                # Parse: '"expr" AS alias'
-                rest = parts[1]
-                # Find the AS keyword
-                as_idx = rest.rfind(" AS ")
-                if as_idx != -1:
-                    expr_part = rest[:as_idx].strip('"')
-                    alias_part = rest[as_idx + 4 :]
-                    args.extend(["APPLY", expr_part, "AS", alias_part])
+            args.extend(["APPLY", expr, "AS", alias])
 
         # APPLY and FILTER for geo_distance() with >, >=, BETWEEN operators
         for i, geo_cond in enumerate(geo_filter_conditions):
@@ -426,9 +412,13 @@ class Translator:
             return f"@{alias} > {radius_m}"
         elif geo_cond.operator == ">=":
             return f"@{alias} >= {radius_m}"
-        else:
-            # Fallback for < and <= (shouldn't reach here normally)
+        elif geo_cond.operator == "<":
             return f"@{alias} < {radius_m}"
+        elif geo_cond.operator == "<=":
+            return f"@{alias} <= {radius_m}"
+        else:
+            # Unknown operator - shouldn't happen
+            raise ValueError(f"Unsupported geo operator: {geo_cond.operator}")
 
     def _convert_to_meters(self, value: float, unit: str) -> float:
         """Convert a distance value to meters.
@@ -439,14 +429,24 @@ class Translator:
 
         Returns:
             Distance in meters.
+
+        Raises:
+            ValueError: If the unit is not supported.
         """
+        # Normalize unit to lowercase
+        normalized_unit = unit.lower()
         conversions = {
             "m": 1.0,
             "km": 1000.0,
             "mi": 1609.344,
             "ft": 0.3048,
         }
-        return value * conversions.get(unit, 1.0)
+        if normalized_unit not in conversions:
+            raise ValueError(
+                f"Unsupported geo distance unit: {unit!r}. "
+                "Supported units are 'm', 'km', 'mi', 'ft'."
+            )
+        return value * conversions[normalized_unit]
 
     def _prefix_fields_in_expression(
         self, expression: str, schema: dict[str, str]

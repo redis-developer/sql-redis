@@ -363,7 +363,13 @@ class SQLParser:
         if len(func_args) >= 3:
             unit_val = self._extract_literal_value(func_args[2])
             if unit_val:
-                geo_unit = str(unit_val)
+                normalized_unit = str(unit_val).lower()
+                if normalized_unit not in {"m", "km", "mi", "ft"}:
+                    raise ValueError(
+                        f"Unsupported geo distance unit: {unit_val!r}. "
+                        "Supported units are 'm', 'km', 'mi', 'ft'."
+                    )
+                geo_unit = normalized_unit
 
         if field_name and geo_lon is not None and geo_lat is not None:
             result.geo_distance_selects.append(
@@ -447,7 +453,13 @@ class SQLParser:
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])
                     if unit_val:
-                        geo_unit = str(unit_val)
+                        normalized_unit = str(unit_val).lower()
+                        if normalized_unit not in {"m", "km", "mi", "ft"}:
+                            raise ValueError(
+                                f"Unsupported geo distance unit: {unit_val!r}. "
+                                "Supported units are 'm', 'km', 'mi', 'ft'."
+                            )
+                        geo_unit = normalized_unit
             elif func_args:
                 # Other function calls
                 first_arg = func_args[0]
@@ -464,13 +476,24 @@ class SQLParser:
 
         if field_name is not None:
             if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Validate radius is provided
+                if value is None:
+                    raise ValueError(
+                        "Geo distance comparison requires a literal radius value"
+                    )
+                try:
+                    radius = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "Invalid radius for geo distance comparison"
+                    ) from exc
                 # Create GeoDistanceCondition with extracted coordinates
                 result.geo_conditions.append(
                     GeoDistanceCondition(
                         field=field_name,
                         lon=float(geo_lon),
                         lat=float(geo_lat),
-                        radius=float(value) if value else 0.0,
+                        radius=radius,
                         operator=operator,
                         unit=geo_unit,
                     )
@@ -520,7 +543,13 @@ class SQLParser:
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])
                     if unit_val:
-                        geo_unit = str(unit_val)
+                        normalized_unit = str(unit_val).lower()
+                        if normalized_unit not in {"m", "km", "mi", "ft"}:
+                            raise ValueError(
+                                f"Unsupported geo distance unit: {unit_val!r}. "
+                                "Supported units are 'm', 'km', 'mi', 'ft'."
+                            )
+                        geo_unit = normalized_unit
 
         low = expression.args.get("low")
         high = expression.args.get("high")
@@ -530,13 +559,25 @@ class SQLParser:
 
         if field_name is not None:
             if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Validate BETWEEN bounds are provided
+                if low_val is None or high_val is None:
+                    raise ValueError(
+                        "Geo distance BETWEEN requires literal low and high values"
+                    )
+                try:
+                    low_radius = float(low_val)
+                    high_radius = float(high_val)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "Invalid radius values for geo distance BETWEEN"
+                    ) from exc
                 # Create GeoDistanceCondition with BETWEEN operator
                 result.geo_conditions.append(
                     GeoDistanceCondition(
                         field=field_name,
                         lon=float(geo_lon),
                         lat=float(geo_lat),
-                        radius=(float(low_val), float(high_val)),  # Tuple for BETWEEN
+                        radius=(low_radius, high_radius),  # Tuple for BETWEEN
                         operator="BETWEEN",
                         unit=geo_unit,
                     )

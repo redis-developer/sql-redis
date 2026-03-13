@@ -237,8 +237,8 @@ class QueryBuilder:
         lat: float,
         alias: str,
         unit: str = "m",
-    ) -> str:
-        """Build APPLY geodistance expression.
+    ) -> tuple[str, str]:
+        """Build geodistance expression and alias for APPLY.
 
         Args:
             field: GEO field name.
@@ -248,21 +248,24 @@ class QueryBuilder:
             unit: Distance unit for conversion.
 
         Returns:
-            APPLY clause like 'APPLY "geodistance(@field, lon, lat)" AS alias'.
+            Tuple of (expression, alias) for use in APPLY clause.
         """
         base_expr = f"geodistance(@{field}, {lon}, {lat})"
 
         # geodistance returns meters - convert if needed
+        # Use consistent conversion factors (same as translator._convert_to_meters)
         if unit == "km":
             expr = f"({base_expr}/1000)"
         elif unit == "mi":
-            expr = f"({base_expr}/1609.34)"
+            # 1 mile = 1609.344 meters (consistent with translator)
+            expr = f"({base_expr}/1609.344)"
         elif unit == "ft":
+            # 1 foot = 0.3048 meters, so meters * (1/0.3048) = meters * 3.28084
             expr = f"({base_expr}*3.28084)"
         else:
             expr = base_expr
 
-        return f'APPLY "{expr}" AS {alias}'
+        return (expr, alias)
 
     def combine_conditions(
         self,

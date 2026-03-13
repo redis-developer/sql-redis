@@ -129,6 +129,32 @@ class TestGeoDistanceOperators:
         assert "FILTER" in result.args
 
 
+class TestGeoValidation:
+    """Tests for geo_distance validation and error handling."""
+
+    def test_invalid_unit_raises_error(self, geo_translator, geo_index):
+        """Invalid unit should raise ValueError."""
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8), 'invalid') < 5000"
+        with pytest.raises(ValueError, match="Unsupported geo distance unit"):
+            geo_translator.translate(sql)
+
+    def test_uppercase_unit_is_normalized(self, geo_translator, geo_index):
+        """Uppercase units should be normalized to lowercase."""
+        sql = f"SELECT name FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8), 'KM') < 5"
+        result = geo_translator.translate(sql)
+        # Should work without error
+        assert result.command == "FT.SEARCH"
+
+    def test_geo_in_select_with_filter_applies_both(self, geo_translator, geo_index):
+        """geo_distance in SELECT with < filter should apply filter in AGGREGATE."""
+        sql = f"SELECT name, geo_distance(location, POINT(-122.4, 37.8)) AS dist FROM {geo_index} WHERE geo_distance(location, POINT(-122.4, 37.8)) < 5000"
+        result = geo_translator.translate(sql)
+        # Should use AGGREGATE (because of SELECT geo_distance)
+        assert result.command == "FT.AGGREGATE"
+        # Should have FILTER for the < condition
+        assert "FILTER" in result.args
+
+
 class TestGeoIntegration:
     """Integration tests verifying actual Redis execution."""
 

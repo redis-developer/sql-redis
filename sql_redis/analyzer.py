@@ -88,6 +88,10 @@ class Analyzer:
         for geo_cond in parsed.geo_conditions:
             referenced_fields.add(geo_cond.field)
 
+        # Fields from geo_distance selects
+        for geo_select in parsed.geo_distance_selects:
+            referenced_fields.add(geo_select.field)
+
         # Fields from aggregations
         for agg in parsed.aggregations:
             if agg.field:
