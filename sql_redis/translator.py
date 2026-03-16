@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
-from sql_redis.parser import Condition, GeoDistanceCondition, SQLParser
+from sql_redis.parser import (
+    SQL_TO_REDIS_DATE_FUNCTIONS,
+    Condition,
+    GeoDistanceCondition,
+    SQLParser,
+    parse_date_to_timestamp,
+)
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
@@ -89,6 +95,21 @@ class Translator:
             geo.operator in (">", ">=", "BETWEEN") for geo in parsed.geo_conditions
         )
 
+        # Check for date function conditions in WHERE (require FT.AGGREGATE)
+        has_date_func_conditions = any(
+            self._is_date_function_condition(c) for c in parsed.conditions
+        )
+
+        # Validate: date function predicates cannot be combined with OR
+        # Date filters are applied via FILTER clauses (ANDed with query).
+        # Combining with OR would change semantics.
+        if has_date_func_conditions and parsed.boolean_operator == "OR":
+            raise ValueError(
+                "Date function predicates cannot be combined with OR; "
+                "they are applied as top-level filters and would change query "
+                "semantics. Rewrite the query to avoid OR with date functions."
+            )
+
         # Determine if we need FT.AGGREGATE
         use_aggregate = (
             len(analyzed.aggregations) > 0
@@ -96,6 +117,8 @@ class Translator:
             or len(analyzed.computed_fields) > 0
             or len(parsed.geo_distance_selects) > 0  # geo_distance() in SELECT
             or geo_requires_aggregate  # geo_distance with >, >=, BETWEEN
+            or len(analyzed.date_functions) > 0
+            or has_date_func_conditions
         )
 
         # Build query string from conditions
@@ -111,13 +134,18 @@ class Translator:
         parsed = analyzed.parsed
         conditions = parsed.conditions
 
-        if not conditions and not analyzed.vector_search:
+        # Filter out date function conditions (they need FILTER in AGGREGATE)
+        regular_conditions = [
+            c for c in conditions if not self._is_date_function_condition(c)
+        ]
+
+        if not regular_conditions and not analyzed.vector_search:
             return "*"
 
         # Build condition strings by type
         condition_strings: list[str] = []
 
-        for condition in conditions:
+        for condition in regular_conditions:
             field_type = analyzed.get_field_type(condition.field)
             condition_str = self._build_condition(condition, field_type)
             condition_strings.append(condition_str)
@@ -171,11 +199,16 @@ class Translator:
             # Cast value to expected type for numeric conditions
             numeric_value: int | float | tuple[int | float, int | float]
             if isinstance(condition.value, tuple):
-                numeric_value = condition.value  # type: ignore[assignment]
+                # Handle tuple values (e.g., BETWEEN) - try date conversion for each
+                low, high = condition.value
+                low_val = self._convert_to_numeric(low)
+                high_val = self._convert_to_numeric(high)
+                numeric_value = (low_val, high_val)
             elif isinstance(condition.value, (int, float)):
                 numeric_value = condition.value
             else:
-                numeric_value = float(condition.value)  # type: ignore[arg-type]
+                # Try date string conversion for NUMERIC fields
+                numeric_value = self._convert_to_numeric(condition.value)
             return self._query_builder.build_numeric_condition(
                 condition.field,
                 operator,
@@ -189,6 +222,29 @@ class Translator:
                 str(condition.value),
                 condition.negated,
             )
+
+    def _convert_to_numeric(self, value: object) -> int | float:
+        """Convert a value to numeric, trying date string conversion if needed.
+
+        Args:
+            value: The value to convert. Can be int, float, or string (possibly a date).
+
+        Returns:
+            Numeric value (int or float).
+
+        Raises:
+            ValueError: If conversion fails.
+        """
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            # Try date string to timestamp conversion first
+            timestamp = parse_date_to_timestamp(value)
+            if timestamp is not None:
+                return timestamp
+            # Fall back to float conversion
+            return float(value)
+        return float(value)  # type: ignore[arg-type]
 
     def _build_search(
         self, analyzed: AnalyzedQuery, query_string: str
@@ -275,12 +331,19 @@ class Translator:
         # Load geo fields used in geo_distance() WHERE with >, >=, BETWEEN
         for geo_cond in geo_filter_conditions:
             load_fields.add(geo_cond.field)
-        # Load regular SELECT fields for FT.AGGREGATE
-        if parsed.fields and parsed.fields != ["*"]:
-            for field in parsed.fields:
+        # Load source fields for date functions in SELECT
+        for date_func in analyzed.date_functions:
+            load_fields.add(date_func.field)
+        # Load source fields for date function conditions in WHERE
+        for condition in parsed.conditions:
+            if self._is_date_function_condition(condition):
+                load_fields.add(condition.field)
+        # Load explicit SELECT fields for FT.AGGREGATE
+        for field_name in parsed.fields:
+            if field_name != "*":
                 # Skip computed fields (they have aliases from geo_distance)
-                if field not in [gs.alias for gs in parsed.geo_distance_selects]:
-                    load_fields.add(field)
+                if field_name not in [gs.alias for gs in parsed.geo_distance_selects]:
+                    load_fields.add(field_name)
 
         if load_fields:
             args.append("LOAD")
@@ -319,6 +382,62 @@ class Translator:
             args.extend(["APPLY", geo_expr, "AS", geo_alias])
             # FILTER based on operator
             filter_expr = self._build_geo_filter_expression(geo_cond, geo_alias)
+            args.extend(["FILTER", filter_expr])
+
+        # APPLY for date functions (YEAR, MONTH, DAY, etc.) from SELECT
+        for date_func in analyzed.date_functions:
+            redis_func = SQL_TO_REDIS_DATE_FUNCTIONS.get(date_func.function)
+            if redis_func:
+                if date_func.function == "DATE_FORMAT" and date_func.format_string:
+                    # DATE_FORMAT(field, format) -> timefmt(@field, format)
+                    # Escape backslashes and quotes in format string
+                    escaped_fmt = date_func.format_string.replace("\\", "\\\\").replace(
+                        '"', '\\"'
+                    )
+                    expression = f'{redis_func}(@{date_func.field}, "{escaped_fmt}")'
+                else:
+                    # Simple date extraction: YEAR(field) -> year(@field)
+                    expression = f"{redis_func}(@{date_func.field})"
+                args.extend(["APPLY", expression, "AS", date_func.alias])
+
+        # APPLY for date function conditions in WHERE (need to compute before FILTER)
+        date_func_conditions = [
+            c for c in parsed.conditions if self._is_date_function_condition(c)
+        ]
+
+        # Validate: negated date function conditions are not supported
+        for condition in date_func_conditions:
+            if condition.negated:
+                raise ValueError(
+                    "Negated date function conditions (NOT YEAR(...), etc.) "
+                    "are not supported"
+                )
+
+        # Track which date functions we've already computed with canonical alias.
+        # Only skip if SELECT used the canonical alias (e.g., year_created_at).
+        # If SELECT used a custom alias (e.g., YEAR(created_at) AS year),
+        # we still need to compute the canonical alias for FILTER.
+        computed_canonical_aliases = {
+            (df.function, df.field)
+            for df in analyzed.date_functions
+            if df.alias == f"{df.function.lower()}_{df.field}"
+        }
+        for condition in date_func_conditions:
+            parts = condition.operator.rsplit("_", 1)
+            func_name = parts[0]
+            redis_func = SQL_TO_REDIS_DATE_FUNCTIONS.get(func_name)
+            if (
+                redis_func
+                and (func_name, condition.field) not in computed_canonical_aliases
+            ):
+                expression = f"{redis_func}(@{condition.field})"
+                alias = f"{func_name.lower()}_{condition.field}"
+                args.extend(["APPLY", expression, "AS", alias])
+                computed_canonical_aliases.add((func_name, condition.field))
+
+        # FILTER for date function conditions
+        for condition in date_func_conditions:
+            filter_expr = self._build_date_function_filter(condition)
             args.extend(["FILTER", filter_expr])
 
         # GROUPBY
@@ -469,3 +588,61 @@ class Translator:
             pattern = rf"(?<!@)\b{re.escape(field_name)}\b"
             result = re.sub(pattern, f"@{field_name}", result)
         return result
+
+    def _is_date_function_condition(self, condition) -> bool:
+        """Check if a condition involves a date function.
+
+        Date function conditions have operators like YEAR_=, MONTH_>, etc.
+        Note: DATE_FORMAT is excluded - it's rejected at parse time because
+        the format string can't be represented in the Condition model.
+        """
+        date_prefixes = (
+            "YEAR_",
+            "MONTH_",
+            "DAY_",
+            "DAYOFWEEK_",
+            "DAYOFYEAR_",
+            "HOUR_",
+            "MINUTE_",
+        )
+        return condition.operator.startswith(date_prefixes)
+
+    def _build_date_function_filter(self, condition) -> str:
+        """Build a FILTER expression for a date function condition.
+
+        For example: YEAR(created_at) = 2024 -> @year_created_at == 2024
+        """
+        # Parse operator: "YEAR_=" -> func="YEAR", op="="
+        parts = condition.operator.rsplit("_", 1)
+        func_name = parts[0]
+        op = parts[1] if len(parts) > 1 else "="
+
+        # Build the alias used in APPLY
+        alias = f"{func_name.lower()}_{condition.field}"
+
+        # Map SQL operators to Redis FILTER operators
+        op_map = {"=": "==", "!=": "!=", ">": ">", ">=": ">=", "<": "<", "<=": "<="}
+        redis_op = op_map.get(op, "==")
+
+        # Normalize value for FILTER expression (quote strings, pass numbers as-is)
+        normalized_value = self._normalize_filter_value(condition.value)
+
+        return f"@{alias} {redis_op} {normalized_value}"
+
+    def _normalize_filter_value(self, value: object) -> str:
+        """Normalize a value for use in FILTER expressions.
+
+        Redis FILTER expressions require string values to be quoted.
+
+        Args:
+            value: The value to normalize.
+
+        Returns:
+            String representation suitable for FILTER expression.
+        """
+        if isinstance(value, (int, float)):
+            return str(value)
+        # Quote string values for FILTER, escaping backslashes and double quotes
+        str_value = str(value)
+        escaped_value = str_value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped_value}"'

@@ -3,10 +3,70 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import sqlglot
 from sqlglot import exp
+
+# Regex patterns for ISO 8601 date/datetime detection
+# Date: YYYY-MM-DD
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Datetime: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS (with optional timezone)
+DATETIME_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def parse_date_to_timestamp(value: str) -> int | None:
+    """Parse an ISO 8601 date/datetime string to Unix timestamp.
+
+    Supports:
+    - Date: '2024-01-01' (interpreted as midnight UTC)
+    - Datetime: '2024-01-01T12:00:00' or '2024-01-01 12:00:00'
+    - Datetime with timezone: '2024-01-01T12:00:00Z', '2024-01-01T12:00:00+00:00'
+
+    Args:
+        value: The string value to parse.
+
+    Returns:
+        Unix timestamp as integer, or None if not a valid date string.
+    """
+    # Check if it matches date pattern
+    if DATE_PATTERN.match(value):
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%d")
+            # Treat as UTC midnight
+            dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            return None
+
+    # Check if it matches datetime pattern
+    if DATETIME_PATTERN.match(value):
+        # Normalize: replace space with T for parsing
+        normalized = value.replace(" ", "T")
+
+        # Normalize 'Z' (UTC designator) to '+00:00' for fromisoformat
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+
+        # Normalize timezone offsets without colon (+0000 -> +00:00)
+        # This ensures compatibility with datetime.fromisoformat
+        normalized = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", normalized)
+
+        try:
+            # Use fromisoformat for robust parsing (handles fractional seconds)
+            dt = datetime.fromisoformat(normalized)
+            # If no timezone info, treat as UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            return None
+
+    return None
 
 
 @dataclass
@@ -27,6 +87,64 @@ class ComputedField:
 
     expression: str
     alias: str
+
+
+@dataclass
+class DateFunctionSpec:
+    """Specification for a date extraction function.
+
+    Maps SQL date functions to Redis APPLY functions:
+    - YEAR(field) → year(@field)
+    - MONTH(field) → monthofyear(@field)
+    - DAY(field) → dayofmonth(@field)
+    - DAYOFWEEK(field) → dayofweek(@field)
+    - DAYOFYEAR(field) → dayofyear(@field)
+    - HOUR(field) → hour(@field)
+    - MINUTE(field) → minute(@field)
+    - DATE_FORMAT(field, format) → timefmt(@field, format)
+    """
+
+    function: str  # SQL function name (YEAR, MONTH, etc.)
+    field: str  # Field name
+    alias: str  # Output alias
+    format_string: str | None = None  # For DATE_FORMAT only
+
+
+# Mapping from SQL date function names to Redis APPLY function names
+SQL_TO_REDIS_DATE_FUNCTIONS = {
+    "YEAR": "year",
+    "MONTH": "monthofyear",
+    "DAY": "dayofmonth",
+    "DAYOFWEEK": "dayofweek",
+    "DAYOFYEAR": "dayofyear",
+    "HOUR": "hour",
+    "MINUTE": "minute",
+    "DATE_FORMAT": "timefmt",
+}
+
+# Mapping from sqlglot expression type names to SQL function names
+SQLGLOT_TO_SQL_DATE_FUNCTIONS = {
+    "Year": "YEAR",
+    "Month": "MONTH",
+    "Day": "DAY",
+    "DayOfWeek": "DAYOFWEEK",
+    "DayOfYear": "DAYOFYEAR",
+    "DayOfMonth": "DAY",  # DAY and DayOfMonth are equivalent
+    "Hour": "HOUR",
+    "Minute": "MINUTE",
+}
+
+# Mapping from sqlglot expression types to SQL function names (for type checking)
+SQLGLOT_DATE_EXPR_TYPES = {
+    exp.Year: "YEAR",
+    exp.Month: "MONTH",
+    exp.Day: "DAY",
+    exp.DayOfWeek: "DAYOFWEEK",
+    exp.DayOfYear: "DAYOFYEAR",
+    exp.DayOfMonth: "DAY",
+    exp.Hour: "HOUR",
+    exp.Minute: "MINUTE",
+}
 
 
 @dataclass
@@ -92,6 +210,7 @@ class ParsedQuery:
     boolean_operator: str = "AND"
     aggregations: list[AggregationSpec] = dataclasses.field(default_factory=list)
     computed_fields: list[ComputedField] = dataclasses.field(default_factory=list)
+    date_functions: list[DateFunctionSpec] = dataclasses.field(default_factory=list)
     vector_search: VectorSearchSpec | None = None
     groupby_fields: list[str] = dataclasses.field(default_factory=list)
     orderby_fields: list[tuple[str, str]] = dataclasses.field(
@@ -220,6 +339,21 @@ class SQLParser:
             result.aggregations.append(
                 AggregationSpec(function=func_name, field=field_name, alias=alias)
             )
+        elif isinstance(
+            expression,
+            (
+                exp.Year,
+                exp.Month,
+                exp.Day,
+                exp.DayOfWeek,
+                exp.DayOfYear,
+                exp.DayOfMonth,
+                exp.Hour,
+                exp.Minute,
+            ),
+        ):
+            # Date extraction functions
+            self._process_date_expression(expression, result, alias)
         elif isinstance(expression, exp.Paren):
             # Parenthesized expression - computed field
             inner_expr = expression.this.sql()
@@ -261,7 +395,8 @@ class SQLParser:
         elif isinstance(expression, exp.Anonymous):
             # Custom function call (e.g., vector_distance) - check before exp.Func
             # since Anonymous is a subclass of Func
-            func_name = expression.name.lower()
+            func_name = expression.name.upper()
+            func_name_lower = func_name.lower()
             # Redis-specific reducer functions that sqlglot doesn't recognize
             redis_reducers = {
                 "count_distinct",
@@ -269,7 +404,7 @@ class SQLParser:
                 "quantile",
                 "random_sample",
             }
-            if func_name == "vector_distance":
+            if func_name_lower == "vector_distance":
                 # Extract the vector field name from first argument
                 if expression.expressions:
                     first_arg = expression.expressions[0]
@@ -277,12 +412,12 @@ class SQLParser:
                         field_name = first_arg.name
                         result.vector_search = VectorSearchSpec(
                             field=field_name,
-                            alias=alias or func_name,
+                            alias=alias or func_name_lower,
                         )
-            elif func_name == "geo_distance":
+            elif func_name_lower == "geo_distance":
                 # geo_distance(field, POINT(lon, lat), unit) in SELECT
                 self._process_geo_distance_select(expression, result, alias)
-            elif func_name in redis_reducers:
+            elif func_name_lower in redis_reducers:
                 # Redis-specific reducer functions
                 field_name = None
                 reducer_extra_args: list[str] = []
@@ -296,12 +431,15 @@ class SQLParser:
                             reducer_extra_args.append(str(arg.this))
                 result.aggregations.append(
                     AggregationSpec(
-                        function=func_name.upper(),
+                        function=func_name,
                         field=field_name,
                         alias=alias,
                         extra_args=reducer_extra_args,
                     )
                 )
+            elif func_name in SQL_TO_REDIS_DATE_FUNCTIONS:
+                # Date extraction functions: YEAR, MONTH, DAY, etc.
+                self._process_date_function(expression, result, alias)
             else:
                 # Other custom functions - treat as computed field
                 expr_str = expression.sql()
@@ -391,6 +529,89 @@ class SQLParser:
             )
         )
 
+    def _process_date_function(
+        self, expression, result: ParsedQuery, alias: str | None
+    ) -> None:
+        """Process a date extraction function (YEAR, MONTH, DAY, etc.).
+
+        Args:
+            expression: The sqlglot Anonymous expression for the function.
+            result: The ParsedQuery to update.
+            alias: Optional alias for the result.
+        """
+        func_name = expression.name.upper()
+        field_name = None
+        format_string = None
+
+        args = expression.expressions or []
+
+        if func_name == "DATE_FORMAT":
+            # DATE_FORMAT requires exactly 2 arguments: field, format_string
+            if len(args) != 2:
+                raise ValueError(
+                    "DATE_FORMAT requires exactly 2 arguments: field, format_string"
+                )
+            first_arg, second_arg = args
+            if isinstance(first_arg, exp.Column):
+                field_name = first_arg.name
+            # Format argument must be a literal string
+            if not isinstance(second_arg, exp.Literal) or not second_arg.is_string:
+                raise ValueError("DATE_FORMAT format argument must be a literal string")
+            format_string = second_arg.this
+        elif args:
+            first_arg = args[0]
+            if isinstance(first_arg, exp.Column):
+                field_name = first_arg.name
+
+        if field_name:
+            # Generate default alias if not provided
+            if alias is None:
+                if func_name == "DATE_FORMAT":
+                    alias = f"formatted_{field_name}"
+                else:
+                    alias = f"{func_name.lower()}_{field_name}"
+
+            result.date_functions.append(
+                DateFunctionSpec(
+                    function=func_name,
+                    field=field_name,
+                    alias=alias,
+                    format_string=format_string,
+                )
+            )
+
+    def _process_date_expression(
+        self, expression, result: ParsedQuery, alias: str | None
+    ) -> None:
+        """Process a sqlglot date expression (Year, Month, Day, etc.).
+
+        Args:
+            expression: The sqlglot date expression (exp.Year, exp.Month, etc.).
+            result: The ParsedQuery to update.
+            alias: Optional alias for the result.
+        """
+        expr_type = type(expression).__name__
+        func_name = SQLGLOT_TO_SQL_DATE_FUNCTIONS.get(expr_type)
+
+        if func_name and expression.this:
+            field_name = None
+            if isinstance(expression.this, exp.Column):
+                field_name = expression.this.name
+
+            if field_name:
+                # Generate default alias if not provided
+                if alias is None:
+                    alias = f"{func_name.lower()}_{field_name}"
+
+                result.date_functions.append(
+                    DateFunctionSpec(
+                        function=func_name,
+                        field=field_name,
+                        alias=alias,
+                        format_string=None,
+                    )
+                )
+
     def _process_where_clause(
         self, expression, result: ParsedQuery, negated: bool = False
     ) -> None:
@@ -440,8 +661,15 @@ class SQLParser:
         if isinstance(expression.this, exp.Column):
             field_name = expression.this.name
         elif isinstance(expression.this, exp.Anonymous):
-            # Function call like geo_distance(location, POINT(...))
+            # Function call like geo_distance(location, POINT(...)) or DATE_FORMAT
             func_name = expression.this.name.upper()
+            # DATE_FORMAT in WHERE is not supported - format string can't be
+            # represented in the Condition model. Use DATE_FORMAT in SELECT instead.
+            if func_name == "DATE_FORMAT":
+                raise ValueError(
+                    "DATE_FORMAT in WHERE conditions is not supported. "
+                    "Use DATE_FORMAT in the SELECT clause instead."
+                )
             func_args = expression.this.expressions
             if func_name == "GEO_DISTANCE" and func_args:
                 is_geo_distance = True
@@ -469,13 +697,16 @@ class SQLParser:
                 if isinstance(first_arg, exp.Column):
                     field_name = first_arg.name
                     operator = f"{func_name}_{operator}"
+        elif type(expression.this) in SQLGLOT_DATE_EXPR_TYPES:
+            # Built-in date expression like YEAR(field), MONTH(field), etc.
+            func_name = SQLGLOT_DATE_EXPR_TYPES[type(expression.this)]
+            if expression.this.this and isinstance(expression.this.this, exp.Column):
+                field_name = expression.this.this.name
+                # Use function name as operator prefix
+                operator = f"{func_name}_{operator}"
 
-        # Get value from right side
-        if isinstance(expression.expression, exp.Literal):
-            value = expression.expression.this
-            # Convert numeric strings to numbers
-            if expression.expression.is_number:
-                value = int(value) if "." not in str(value) else float(value)
+        # Get value from right side (handles numbers, strings, and date literals)
+        value = self._extract_literal_value(expression.expression)
 
         if field_name is not None:
             if is_geo_distance:
@@ -650,12 +881,28 @@ class SQLParser:
                     )
                 )
 
-    def _extract_literal_value(self, expression):
-        """Extract a Python value from a sqlglot Literal or Neg expression."""
+    def _extract_literal_value(self, expression, convert_dates: bool = False):
+        """Extract a Python value from a sqlglot Literal or Neg expression.
+
+        Args:
+            expression: The sqlglot expression to extract from.
+            convert_dates: If True, convert ISO 8601 date strings to Unix timestamps.
+                          Default is False to avoid changing semantics for TEXT/TAG
+                          fields. Date conversion should be handled by the translator
+                          when the field type is known to be NUMERIC.
+
+        Returns:
+            The extracted value, or None if not a literal.
+        """
         if isinstance(expression, exp.Literal):
             value = expression.this
             if expression.is_number:
                 return int(value) if "." not in str(value) else float(value)
+            # Check if string value is a date/datetime and convert to timestamp
+            if convert_dates and isinstance(value, str):
+                timestamp = self._parse_date_to_timestamp(value)
+                if timestamp is not None:
+                    return timestamp
             return value
         elif isinstance(expression, exp.Neg):
             # Handle negative numbers: Neg(Literal(122.4)) -> -122.4
@@ -683,3 +930,10 @@ class SQLParser:
                 "Supported units are 'm', 'km', 'mi', 'ft'."
             )
         return normalized_unit
+
+    def _parse_date_to_timestamp(self, value: str) -> int | None:
+        """Parse an ISO 8601 date/datetime string to Unix timestamp.
+
+        Delegates to module-level parse_date_to_timestamp function.
+        """
+        return parse_date_to_timestamp(value)
