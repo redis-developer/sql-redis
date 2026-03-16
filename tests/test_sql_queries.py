@@ -248,9 +248,9 @@ class TestTagFieldMultiValueSearch:
             WHERE tags IN ('sale', 'featured') OR category = 'electronics'
             """
         )
-        assert len(result.rows) >= 1, (
-            "Should return products matching tag OR conditions"
-        )
+        assert (
+            len(result.rows) >= 1
+        ), "Should return products matching tag OR conditions"
 
     def test_tag_in_clause_only(self, executor: Executor, products_data: str):
         """IN clause on TAG field without OR."""
