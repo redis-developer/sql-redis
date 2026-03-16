@@ -197,39 +197,43 @@ class TestQueryBuilderGeoFields:
     def test_geo_distance_apply(self):
         """GEO field distance as computed field."""
         builder = QueryBuilder()
-        result = builder.build_geo_distance_apply(
+        expr, alias = builder.build_geo_distance_apply(
             "location", lon=-122.4, lat=37.8, alias="dist"
         )
 
-        assert result == 'APPLY "geodistance(@location, -122.4, 37.8)" AS dist'
+        assert expr == "geodistance(@location, -122.4, 37.8)"
+        assert alias == "dist"
 
     def test_geo_distance_in_miles(self):
         """GEO field distance converted to miles."""
         builder = QueryBuilder()
-        result = builder.build_geo_distance_apply(
+        expr, alias = builder.build_geo_distance_apply(
             "location", lon=-73.99, lat=40.75, alias="miles", unit="mi"
         )
 
-        # geodistance returns meters, divide by 1609.34 for miles
-        assert "1609.34" in result
+        # geodistance returns meters, divide by 1609.344 for miles
+        assert "1609.344" in expr
+        assert alias == "miles"
 
     def test_geo_distance_in_km(self):
         """GEO field distance converted to kilometers."""
         builder = QueryBuilder()
-        result = builder.build_geo_distance_apply(
+        expr, alias = builder.build_geo_distance_apply(
             "location", lon=-122.4, lat=37.8, alias="km_dist", unit="km"
         )
 
-        assert "/1000" in result
+        assert "/1000" in expr
+        assert alias == "km_dist"
 
     def test_geo_distance_in_feet(self):
         """GEO field distance converted to feet."""
         builder = QueryBuilder()
-        result = builder.build_geo_distance_apply(
+        expr, alias = builder.build_geo_distance_apply(
             "location", lon=-122.4, lat=37.8, alias="ft_dist", unit="ft"
         )
 
-        assert "*3.28084" in result
+        assert "*3.28084" in expr
+        assert alias == "ft_dist"
 
 
 class TestQueryBuilderBooleanCombinations:

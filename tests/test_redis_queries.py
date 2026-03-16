@@ -2,7 +2,6 @@
 
 import struct
 
-import pytest
 import redis
 
 

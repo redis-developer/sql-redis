@@ -52,4 +52,9 @@ Thumbs.db
 
 # Project specific
 .ai/
+nitin_docs/
 
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
