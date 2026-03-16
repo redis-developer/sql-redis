@@ -58,3 +58,4 @@ nitin_docs/
 # Jupyter notebooks
 *.ipynb
 .ipynb_checkpoints/
+.ipynb_checkpoints/

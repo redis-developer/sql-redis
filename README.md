@@ -22,8 +22,8 @@ executor = Executor(client, registry)
 
 # Simple query
 result = executor.execute("""
-    SELECT title, price 
-    FROM products 
+    SELECT title, price
+    FROM products
     WHERE category = 'electronics' AND price < 500
     ORDER BY price ASC
     LIMIT 10
@@ -156,6 +156,7 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [x] Hybrid search (filters + vector)
 - [x] Full-text search: `LIKE 'prefix%'` (prefix), `fulltext(field, 'terms')` function
 - [x] GEO field queries with full operator support (see below)
+- [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc. (see below)
 
 ## What's Not Implemented (Yet...)
 
@@ -163,8 +164,77 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [ ] Subqueries
 - [ ] HAVING clause
 - [ ] DISTINCT
-- [ ] DATE/DATETIME support (use NUMERIC with Unix timestamps)
 - [ ] Index creation from SQL (CREATE INDEX)
+
+### DATE/DATETIME Handling
+
+Redis does not have a native DATE field type. Dates are stored as **NUMERIC fields** with Unix timestamps.
+
+**sql-redis automatically converts ISO 8601 date literals to Unix timestamps:**
+
+```sql
+-- Date literal (automatically converted to timestamp 1704067200)
+SELECT * FROM events WHERE created_at > '2024-01-01'
+
+-- Datetime literal with time
+SELECT * FROM events WHERE created_at > '2024-01-01T12:00:00'
+
+-- Date range with BETWEEN
+SELECT * FROM events WHERE created_at BETWEEN '2024-01-01' AND '2024-01-31'
+
+-- Multiple date conditions
+SELECT * FROM events WHERE created_at > '2024-01-01' AND created_at < '2024-12-31'
+```
+
+**Supported date formats:**
+- Date: `'2024-01-01'` (interpreted as midnight UTC)
+- Datetime: `'2024-01-01T12:00:00'` or `'2024-01-01 12:00:00'`
+- Datetime with timezone: `'2024-01-01T12:00:00Z'`, `'2024-01-01T12:00:00+00:00'`
+
+**Note:** All dates without timezone are interpreted as UTC. You can also use raw Unix timestamps if preferred:
+
+```sql
+SELECT * FROM events WHERE created_at > 1704067200
+```
+
+### Date Functions
+
+Extract date parts using SQL functions that map to Redis `APPLY` expressions:
+
+| SQL Function | Redis Function | Description |
+|--------------|----------------|-------------|
+| `YEAR(field)` | `year(@field)` | Extract year (e.g., 2024) |
+| `MONTH(field)` | `monthofyear(@field)` | Extract month (0-11) |
+| `DAY(field)` | `dayofmonth(@field)` | Extract day of month (1-31) |
+| `HOUR(field)` | `hour(@field)` | Round to hour |
+| `MINUTE(field)` | `minute(@field)` | Round to minute |
+| `DAYOFWEEK(field)` | `dayofweek(@field)` | Day of week (0=Sunday) |
+| `DAYOFYEAR(field)` | `dayofyear(@field)` | Day of year (0-365) |
+| `DATE_FORMAT(field, fmt)` | `timefmt(@field, fmt)` | Format timestamp |
+
+**Examples:**
+
+```sql
+-- Extract year and month
+SELECT name, YEAR(created_at) AS year, MONTH(created_at) AS month FROM events
+
+-- Filter by year
+SELECT name FROM events WHERE YEAR(created_at) = 2024
+
+-- Group by date parts
+SELECT YEAR(created_at) AS year, COUNT(*) FROM events GROUP BY year
+
+-- Format dates
+SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d') AS date FROM events
+```
+
+**Note:** Redis's `monthofyear()` returns 0-11 (not 1-12), and `dayofweek()` returns 0 for Sunday.
+
+#### Limitations
+
+- `NOT YEAR(field) = 2024` is not supported (raises `ValueError`)
+- `DATE_FORMAT()` is only supported in SELECT, not in WHERE (raises `ValueError`)
+- Date functions combined with `OR` are not supported (raises `ValueError`)
 
 ### GEO Field Support
 
