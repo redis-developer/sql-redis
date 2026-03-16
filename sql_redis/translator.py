@@ -407,14 +407,18 @@ class Translator:
                 high_m = self._convert_to_meters(geo_cond.radius[1], geo_cond.unit)
                 return f"@{alias} >= {low_m} && @{alias} <= {high_m}"
             else:
-                # Fallback - shouldn't happen
-                return f"@{alias} >= 0"
+                # Internal inconsistency: BETWEEN requires (low, high) tuple
+                raise ValueError(
+                    f"Invalid geo radius for BETWEEN operator: {geo_cond.radius!r}"
+                )
 
         # Convert radius to meters if needed (geodistance() returns meters)
-        # At this point, radius is guaranteed to be a float (BETWEEN case handled above)
+        # At this point, radius should be a float (BETWEEN case handled above)
         if isinstance(geo_cond.radius, tuple):
-            # Shouldn't reach here, but handle gracefully
-            return f"@{alias} >= 0"
+            # Internal inconsistency: tuple radius outside BETWEEN context
+            raise ValueError(
+                f"Unexpected tuple geo radius outside BETWEEN: {geo_cond.radius!r}"
+            )
         radius_m = self._convert_to_meters(geo_cond.radius, geo_cond.unit)
 
         if geo_cond.operator == ">":

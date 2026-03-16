@@ -337,44 +337,59 @@ class SQLParser:
     def _process_geo_distance_select(
         self, expression, result: ParsedQuery, alias: str | None
     ) -> None:
-        """Process geo_distance() in SELECT clause for FT.AGGREGATE APPLY."""
+        """Process geo_distance() in SELECT clause for FT.AGGREGATE APPLY.
+
+        Expected signature: geo_distance(field, POINT(lon, lat)[, unit])
+        Raises ValueError for malformed usage rather than silently ignoring.
+        """
         func_args = expression.expressions
         if not func_args:
-            return
+            raise ValueError(
+                "geo_distance() requires at least 2 arguments: "
+                "geo_distance(field, POINT(lon, lat)[, unit])"
+            )
 
-        field_name = None
-        geo_lon = None
-        geo_lat = None
-        geo_unit = "m"  # Default to meters for geodistance()
+        # First arg: field name must be a column
+        if not isinstance(func_args[0], exp.Column):
+            raise ValueError("geo_distance() first argument must be a column reference")
+        field_name = func_args[0].name
 
-        # First arg: field name
-        if isinstance(func_args[0], exp.Column):
-            field_name = func_args[0].name
+        # Second arg: POINT(lon, lat) required
+        if len(func_args) < 2:
+            raise ValueError(
+                "geo_distance() requires a POINT(lon, lat) second argument"
+            )
+        if not isinstance(func_args[1], exp.Anonymous):
+            raise ValueError("geo_distance() second argument must be POINT(lon, lat)")
+        point_func = func_args[1]
+        if point_func.name.upper() != "POINT" or len(point_func.expressions) < 2:
+            raise ValueError("geo_distance() second argument must be POINT(lon, lat)")
 
-        # Second arg: POINT(lon, lat) - matches Redis's native format
-        if len(func_args) >= 2 and isinstance(func_args[1], exp.Anonymous):
-            point_func = func_args[1]
-            if point_func.name.upper() == "POINT" and len(point_func.expressions) >= 2:
-                # POINT(lon, lat) - no swap needed, matches Redis
-                geo_lon = self._extract_literal_value(point_func.expressions[0])
-                geo_lat = self._extract_literal_value(point_func.expressions[1])
+        # Extract literal lon/lat values
+        geo_lon = self._extract_literal_value(point_func.expressions[0])
+        geo_lat = self._extract_literal_value(point_func.expressions[1])
+        if geo_lon is None or geo_lat is None:
+            raise ValueError(
+                "geo_distance() POINT(lon, lat) arguments must be literal values"
+            )
 
         # Third arg (optional): unit
+        geo_unit = "m"  # Default to meters
         if len(func_args) >= 3:
             unit_val = self._extract_literal_value(func_args[2])
-            if unit_val:
-                geo_unit = self._validate_geo_unit(unit_val)
+            if unit_val is None:
+                raise ValueError("geo_distance() unit argument must be a literal value")
+            geo_unit = self._validate_geo_unit(unit_val)
 
-        if field_name and geo_lon is not None and geo_lat is not None:
-            result.geo_distance_selects.append(
-                GeoDistanceSelect(
-                    field=field_name,
-                    lon=float(geo_lon),
-                    lat=float(geo_lat),
-                    alias=alias or "geo_distance",
-                    unit=geo_unit,
-                )
+        result.geo_distance_selects.append(
+            GeoDistanceSelect(
+                field=field_name,
+                lon=float(geo_lon),
+                lat=float(geo_lat),
+                alias=alias or "geo_distance",
+                unit=geo_unit,
             )
+        )
 
     def _process_where_clause(
         self, expression, result: ParsedQuery, negated: bool = False
@@ -463,7 +478,12 @@ class SQLParser:
                 value = int(value) if "." not in str(value) else float(value)
 
         if field_name is not None:
-            if is_geo_distance and geo_lon is not None and geo_lat is not None:
+            if is_geo_distance:
+                # Fail fast if POINT(lon, lat) coordinates couldn't be parsed
+                if geo_lon is None or geo_lat is None:
+                    raise ValueError(
+                        "geo_distance() requires POINT(lon, lat) with literal values"
+                    )
                 # Negated geo_distance is not supported; fail clearly
                 if negated:
                     raise ValueError(
@@ -546,7 +566,12 @@ class SQLParser:
         high_val = self._extract_literal_value(high)
 
         if field_name is not None:
-            if is_geo_distance and geo_lon is not None and geo_lat is not None:
+            if is_geo_distance:
+                # Fail fast if POINT(lon, lat) coordinates couldn't be parsed
+                if geo_lon is None or geo_lat is None:
+                    raise ValueError(
+                        "geo_distance() BETWEEN requires POINT(lon, lat) with literal values"
+                    )
                 # Negation is not supported for geo_distance BETWEEN; fail clearly
                 if negated:
                     raise ValueError(
