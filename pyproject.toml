@@ -1,6 +1,6 @@
 [project]
 name = "sql-redis"
-version = "0.2.0"
+version = "0.3.0"
 description = "SQL to Redis command translation utility"
 authors = [{ name = "Redis Inc.", email = "applied.ai@redis.com" }]
 requires-python = ">=3.9,<3.14"
