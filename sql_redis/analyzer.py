@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sql_redis.parser import AggregationSpec, ComputedField, Condition, ParsedQuery
+from sql_redis.parser import (
+    AggregationSpec,
+    ComputedField,
+    Condition,
+    DateFunctionSpec,
+    ParsedQuery,
+)
 
 
 @dataclass
@@ -24,6 +30,7 @@ class AnalyzedQuery:
     field_types: dict[str, str] = field(default_factory=dict)
     aggregations: list[AggregationSpec] = field(default_factory=list)
     computed_fields: list[ComputedField] = field(default_factory=list)
+    date_functions: list[DateFunctionSpec] = field(default_factory=list)
     groupby_fields: list[str] = field(default_factory=list)
     is_global_aggregation: bool = False
     vector_search: VectorSearchAnalysis | None = None
@@ -108,9 +115,18 @@ class Analyzer:
         if parsed.vector_search:
             referenced_fields.add(parsed.vector_search.field)
 
-        # Fields from GROUP BY
+        # Fields from date functions (YEAR, MONTH, etc.)
+        for date_func in parsed.date_functions:
+            referenced_fields.add(date_func.field)
+
+        # Collect aliases from date functions and computed fields (for GROUP BY)
+        alias_names = {df.alias for df in parsed.date_functions}
+        alias_names.update(cf.alias for cf in parsed.computed_fields)
+
+        # Fields from GROUP BY (exclude aliases since they're computed)
         for field_name in parsed.groupby_fields:
-            referenced_fields.add(field_name)
+            if field_name not in alias_names:
+                referenced_fields.add(field_name)
 
         # Resolve field types
         for field_name in referenced_fields:
@@ -118,9 +134,10 @@ class Analyzer:
                 raise ValueError(f"Unknown field: {field_name}")
             result.field_types[field_name] = schema[field_name]
 
-        # Copy aggregations and computed fields
+        # Copy aggregations, computed fields, and date functions
         result.aggregations = parsed.aggregations
         result.computed_fields = parsed.computed_fields
+        result.date_functions = parsed.date_functions
         result.groupby_fields = parsed.groupby_fields
 
         # Determine if this is a global aggregation
