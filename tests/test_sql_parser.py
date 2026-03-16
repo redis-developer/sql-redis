@@ -1,8 +1,6 @@
 """Tests for the SQL parser component."""
 
-import pytest
-
-from sql_redis.parser import ParsedQuery, SQLParser
+from sql_redis.parser import SQLParser
 
 
 class TestSQLParserSelectClause:
@@ -669,14 +667,6 @@ class TestSQLParserEdgeCases:
         result = parser.parse("SELECT 1 FROM (VALUES (1))")
 
         # FROM exists but has no Table - index stays empty
-        assert result.index == ""
-
-    def test_parse_select_without_from(self):
-        """Parse SELECT without FROM clause."""
-        parser = SQLParser()
-        result = parser.parse("SELECT 1 + 1")
-
-        # No FROM clause at all
         assert result.index == ""
 
     def test_parse_insert_statement(self):

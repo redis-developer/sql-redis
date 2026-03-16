@@ -154,6 +154,26 @@ class TestGeoValidation:
         # Should have FILTER for the < condition
         assert "FILTER" in result.args
 
+    def test_negated_geo_distance_raises_error(self, geo_translator, geo_index):
+        """NOT geo_distance(...) should raise a clear error."""
+        sql = f"SELECT name FROM {geo_index} WHERE NOT geo_distance(location, POINT(-122.4, 37.8)) < 5000"
+        with pytest.raises(ValueError, match="Negated geo_distance"):
+            geo_translator.translate(sql)
+
+    def test_negated_geo_distance_between_raises_error(self, geo_translator, geo_index):
+        """NOT geo_distance(...) BETWEEN should raise a clear error."""
+        sql = f"SELECT name FROM {geo_index} WHERE NOT geo_distance(location, POINT(-122.4, 37.8)) BETWEEN 1000 AND 5000"
+        with pytest.raises(
+            ValueError, match="Negation.*not supported.*geo_distance.*BETWEEN"
+        ):
+            geo_translator.translate(sql)
+
+    def test_geo_distance_with_or_raises_error(self, geo_translator, geo_index):
+        """Combining geo_distance with OR should raise a clear error."""
+        sql = f"SELECT name FROM {geo_index} WHERE category = 'retail' OR geo_distance(location, POINT(-122.4, 37.8)) < 5000"
+        with pytest.raises(ValueError, match="cannot be combined with OR"):
+            geo_translator.translate(sql)
+
 
 class TestGeoIntegration:
     """Integration tests verifying actual Redis execution."""
@@ -174,7 +194,7 @@ class TestGeoIntegration:
             },
         ]
         for i, store in enumerate(stores):
-            redis_client.hset(f"store:{i+1}", mapping=store)
+            redis_client.hset(f"store:{i + 1}", mapping=store)
         return geo_index
 
     def test_raw_geofilter_works(self, redis_client, geo_data):

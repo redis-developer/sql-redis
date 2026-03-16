@@ -276,7 +276,7 @@ def products_data(redis_client: redis.Redis, products_index: str):
     ]
 
     for i, product in enumerate(products):
-        key = f"product:{i+1}"
+        key = f"product:{i + 1}"
         redis_client.hset(key, mapping=product)
 
     return products_index
@@ -300,7 +300,7 @@ def vec_data(redis_client: redis.Redis, vec_index: str):
     binary_client = redis.Redis(host=host, port=port, decode_responses=False)
 
     for i, vec in enumerate(vectors):
-        key = f"vec:{i+1}"
+        key = f"vec:{i + 1}"
         binary_client.hset(key, mapping=vec)
 
     binary_client.close()
@@ -349,7 +349,7 @@ def items_data(redis_client: redis.Redis, items_index: str):
     ]
 
     for i, item in enumerate(items):
-        key = f"item:{i+1}"
+        key = f"item:{i + 1}"
         binary_client.hset(key, mapping=item)
 
     binary_client.close()

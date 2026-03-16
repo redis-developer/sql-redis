@@ -2,7 +2,7 @@
 
 import pytest
 
-from sql_redis.analyzer import AnalyzedQuery, Analyzer
+from sql_redis.analyzer import Analyzer
 from sql_redis.parser import SQLParser
 
 

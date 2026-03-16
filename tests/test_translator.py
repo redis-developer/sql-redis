@@ -4,7 +4,7 @@ import pytest
 import redis
 
 from sql_redis.schema import SchemaRegistry
-from sql_redis.translator import TranslatedQuery, Translator
+from sql_redis.translator import Translator
 
 
 @pytest.fixture
@@ -252,7 +252,7 @@ class TestTranslatorAggregate:
         assert result.command == "FT.AGGREGATE"
         idx = result.args.index("GROUPBY")
         assert result.args[idx + 1] == "1"
-        assert "category" in result.args
+        assert "@category" in result.args
 
     def test_group_by_with_sum(self, translator: Translator, basic_index: str):
         """GROUP BY with SUM aggregation (has field)."""

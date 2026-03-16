@@ -6,7 +6,7 @@ import pytest
 import redis
 from testcontainers.redis import RedisContainer
 
-from sql_redis.executor import Executor, QueryResult
+from sql_redis.executor import Executor
 from sql_redis.schema import SchemaRegistry
 
 

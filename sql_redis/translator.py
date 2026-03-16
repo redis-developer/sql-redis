@@ -8,8 +8,6 @@ from sql_redis.analyzer import AnalyzedQuery, Analyzer
 from sql_redis.parser import (
     Condition,
     GeoDistanceCondition,
-    GeoDistanceSelect,
-    ParsedQuery,
     SQLParser,
 )
 from sql_redis.query_builder import QueryBuilder
@@ -79,6 +77,17 @@ class Translator:
         """Build the Redis command from analyzed query."""
         parsed = analyzed.parsed
 
+        # Validate: geo_distance cannot be combined with OR
+        # Geo filters are applied as top-level command args (GEOFILTER/FILTER) and
+        # are not part of the boolean expression. Combining with OR would change
+        # semantics (e.g., `A OR geo_distance(...)` would become `(A) AND geo_filter`).
+        if parsed.geo_conditions and parsed.boolean_operator == "OR":
+            raise ValueError(
+                "Geo distance predicates cannot be combined with OR; "
+                "they are applied as top-level filters and would change query "
+                "semantics. Rewrite the query to avoid OR with geo_distance."
+            )
+
         # Check if any geo conditions require FT.AGGREGATE (>, >=, BETWEEN)
         geo_requires_aggregate = any(
             geo.operator in (">", ">=", "BETWEEN") for geo in parsed.geo_conditions
@@ -95,10 +104,6 @@ class Translator:
 
         # Build query string from conditions
         query_string = self._build_query_string(analyzed)
-
-        # Build arguments
-        args: list[str] = []
-        params: dict[str, object] = {}
 
         if use_aggregate:
             return self._build_aggregate(analyzed, query_string)
@@ -284,7 +289,11 @@ class Translator:
         if load_fields:
             args.append("LOAD")
             args.append(str(len(load_fields)))
-            args.extend(sorted(load_fields))
+            # Redis expects property names prefixed with '@' in LOAD
+            args.extend(
+                f"@{field}" if not field.startswith("@") else field
+                for field in sorted(load_fields)
+            )
 
         # APPLY for computed fields
         for computed in analyzed.computed_fields:

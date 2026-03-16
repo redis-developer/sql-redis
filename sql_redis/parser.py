@@ -363,13 +363,7 @@ class SQLParser:
         if len(func_args) >= 3:
             unit_val = self._extract_literal_value(func_args[2])
             if unit_val:
-                normalized_unit = str(unit_val).lower()
-                if normalized_unit not in {"m", "km", "mi", "ft"}:
-                    raise ValueError(
-                        f"Unsupported geo distance unit: {unit_val!r}. "
-                        "Supported units are 'm', 'km', 'mi', 'ft'."
-                    )
-                geo_unit = normalized_unit
+                geo_unit = self._validate_geo_unit(unit_val)
 
         if field_name and geo_lon is not None and geo_lat is not None:
             result.geo_distance_selects.append(
@@ -453,13 +447,7 @@ class SQLParser:
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])
                     if unit_val:
-                        normalized_unit = str(unit_val).lower()
-                        if normalized_unit not in {"m", "km", "mi", "ft"}:
-                            raise ValueError(
-                                f"Unsupported geo distance unit: {unit_val!r}. "
-                                "Supported units are 'm', 'km', 'mi', 'ft'."
-                            )
-                        geo_unit = normalized_unit
+                        geo_unit = self._validate_geo_unit(unit_val)
             elif func_args:
                 # Other function calls
                 first_arg = func_args[0]
@@ -476,6 +464,12 @@ class SQLParser:
 
         if field_name is not None:
             if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Negated geo_distance is not supported; fail clearly
+                if negated:
+                    raise ValueError(
+                        "Negated geo_distance comparisons (NOT geo_distance(...)) "
+                        "are not supported"
+                    )
                 # Validate radius is provided
                 if value is None:
                     raise ValueError(
@@ -543,13 +537,7 @@ class SQLParser:
                 if len(func_args) >= 3:
                     unit_val = self._extract_literal_value(func_args[2])
                     if unit_val:
-                        normalized_unit = str(unit_val).lower()
-                        if normalized_unit not in {"m", "km", "mi", "ft"}:
-                            raise ValueError(
-                                f"Unsupported geo distance unit: {unit_val!r}. "
-                                "Supported units are 'm', 'km', 'mi', 'ft'."
-                            )
-                        geo_unit = normalized_unit
+                        geo_unit = self._validate_geo_unit(unit_val)
 
         low = expression.args.get("low")
         high = expression.args.get("high")
@@ -559,6 +547,11 @@ class SQLParser:
 
         if field_name is not None:
             if is_geo_distance and geo_lon is not None and geo_lat is not None:
+                # Negation is not supported for geo_distance BETWEEN; fail clearly
+                if negated:
+                    raise ValueError(
+                        "Negation (NOT) is not supported for geo_distance(...) BETWEEN"
+                    )
                 # Validate BETWEEN bounds are provided
                 if low_val is None or high_val is None:
                     raise ValueError(
@@ -645,3 +638,23 @@ class SQLParser:
             if inner_value is not None:
                 return -inner_value
         return None
+
+    def _validate_geo_unit(self, unit_val: object) -> str:
+        """Validate and normalize a geo distance unit.
+
+        Args:
+            unit_val: The unit value to validate.
+
+        Returns:
+            Normalized unit string (lowercase).
+
+        Raises:
+            ValueError: If the unit is not supported.
+        """
+        normalized_unit = str(unit_val).lower()
+        if normalized_unit not in {"m", "km", "mi", "ft"}:
+            raise ValueError(
+                f"Unsupported geo distance unit: {unit_val!r}. "
+                "Supported units are 'm', 'km', 'mi', 'ft'."
+            )
+        return normalized_unit

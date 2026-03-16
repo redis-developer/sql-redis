@@ -2,7 +2,6 @@
 
 import struct
 
-import pytest
 import redis
 
 
@@ -279,9 +278,9 @@ class TestRangeQueryWithBetween:
             row_dict = dict(zip(row[::2], row[1::2]))
             if "price" in row_dict:
                 price = float(row_dict["price"])
-                assert (
-                    100 <= price <= 500
-                ), f"Price {price} should be between 100 and 500"
+                assert 100 <= price <= 500, (
+                    f"Price {price} should be between 100 and 500"
+                )
 
 
 class TestTagFieldMultiValueSearch:
