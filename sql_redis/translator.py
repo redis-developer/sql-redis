@@ -5,11 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
-from sql_redis.parser import (
-    Condition,
-    GeoDistanceCondition,
-    SQLParser,
-)
+from sql_redis.parser import Condition, GeoDistanceCondition, SQLParser
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
