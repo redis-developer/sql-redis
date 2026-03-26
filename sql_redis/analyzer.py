@@ -111,6 +111,12 @@ class Analyzer:
                 if field_name in computed.expression:
                     referenced_fields.add(field_name)
 
+        # Fields from filters (HAVING exists(field))
+        for filter_expr in parsed.filters:
+            for field_name in schema.keys():
+                if field_name in filter_expr:
+                    referenced_fields.add(field_name)
+
         # Fields from vector search
         if parsed.vector_search:
             referenced_fields.add(parsed.vector_search.field)

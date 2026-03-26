@@ -515,3 +515,75 @@ class TestTranslatorIsMissing:
             )
             assert len(w) == 1
             assert "Redis 7.4+" in str(w[0].message)
+
+
+class TestTranslatorExists:
+    """Tests for exists() → FT.AGGREGATE APPLY/FILTER translation."""
+
+    def test_exists_in_select(self, translator: Translator, basic_index: str):
+        """exists(field) in SELECT generates APPLY exists(@field)."""
+        result = translator.translate(
+            f"SELECT exists(status) AS has_status FROM {basic_index}"
+        )
+        assert result.command == "FT.AGGREGATE"
+        assert "APPLY" in result.args
+        apply_idx = result.args.index("APPLY")
+        assert "exists(@status)" in result.args[apply_idx + 1]
+        assert result.args[apply_idx + 2] == "AS"
+        assert result.args[apply_idx + 3] == "has_status"
+
+    def test_exists_loads_referenced_field(
+        self, translator: Translator, basic_index: str
+    ):
+        """Fields inside exists() must be LOADed."""
+        result = translator.translate(
+            f"SELECT exists(status) AS has_status FROM {basic_index}"
+        )
+        assert "LOAD" in result.args
+        load_idx = result.args.index("LOAD")
+        load_count = int(result.args[load_idx + 1])
+        load_fields = result.args[load_idx + 2 : load_idx + 2 + load_count]
+        assert "@status" in load_fields
+
+    def test_multiple_exists_in_select(self, translator: Translator, basic_index: str):
+        """Multiple exists() in SELECT generate multiple APPLY clauses."""
+        result = translator.translate(
+            f"SELECT exists(status) AS has_status, exists(category) AS has_cat "
+            f"FROM {basic_index}"
+        )
+        assert result.command == "FT.AGGREGATE"
+        # Should have two APPLY clauses
+        apply_count = result.args.count("APPLY")
+        assert apply_count == 2
+
+    def test_exists_in_having_generates_filter(
+        self, translator: Translator, basic_index: str
+    ):
+        """HAVING exists(field) generates FILTER exists(@field)."""
+        result = translator.translate(
+            f"SELECT title, status FROM {basic_index} HAVING exists(status)"
+        )
+        assert result.command == "FT.AGGREGATE"
+        assert "FILTER" in result.args
+        filter_idx = result.args.index("FILTER")
+        assert "exists(@status)" in result.args[filter_idx + 1]
+
+    def test_exists_in_having_loads_field(
+        self, translator: Translator, basic_index: str
+    ):
+        """Fields inside HAVING exists() must be LOADed."""
+        result = translator.translate(
+            f"SELECT title FROM {basic_index} HAVING exists(status)"
+        )
+        assert "LOAD" in result.args
+        load_idx = result.args.index("LOAD")
+        load_count = int(result.args[load_idx + 1])
+        load_fields = result.args[load_idx + 2 : load_idx + 2 + load_count]
+        assert "@status" in load_fields
+
+    def test_exists_includes_dialect_2(self, translator: Translator, basic_index: str):
+        """exists() commands still end with DIALECT 2."""
+        result = translator.translate(
+            f"SELECT exists(status) AS has_status FROM {basic_index}"
+        )
+        assert result.args[-2:] == ["DIALECT", "2"]

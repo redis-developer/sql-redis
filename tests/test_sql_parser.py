@@ -1,5 +1,7 @@
 """Tests for the SQL parser component."""
 
+import pytest
+
 from sql_redis.parser import SQLParser
 
 
@@ -810,3 +812,46 @@ class TestSQLParserIsNull:
         assert len(result.conditions) == 1
         assert result.conditions[0].operator == "IS_NOT_NULL"
         assert result.conditions[0].field == "email"
+
+
+class TestSQLParserExists:
+    """Tests for exists() parsing."""
+
+    def test_exists_in_select_produces_computed_field(self):
+        """exists(field) in SELECT produces a computed field."""
+        parser = SQLParser()
+        result = parser.parse("SELECT exists(email) AS has_email FROM idx")
+        assert len(result.computed_fields) == 1
+        assert "exists" in result.computed_fields[0].expression.lower()
+        assert "email" in result.computed_fields[0].expression
+        assert result.computed_fields[0].alias == "has_email"
+
+    def test_exists_without_alias_auto_generates(self):
+        """exists(field) without alias generates one."""
+        parser = SQLParser()
+        result = parser.parse("SELECT exists(email) FROM idx")
+        assert len(result.computed_fields) == 1
+        assert result.computed_fields[0].alias is not None
+        assert result.computed_fields[0].alias != ""
+
+    def test_multiple_exists_in_select(self):
+        """Multiple exists() in SELECT produce multiple computed fields."""
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT exists(email) AS has_email, exists(phone) AS has_phone FROM idx"
+        )
+        assert len(result.computed_fields) == 2
+
+    def test_exists_in_having_produces_filter(self):
+        """exists() in HAVING produces a filter expression."""
+        parser = SQLParser()
+        result = parser.parse("SELECT name FROM idx HAVING exists(email)")
+        assert len(result.filters) == 1
+        assert "exists" in result.filters[0].lower()
+        assert "email" in result.filters[0]
+
+    def test_exists_in_where_raises_error(self):
+        """exists() in WHERE raises ValueError (only valid in aggregate context)."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="exists.*aggregate"):
+            parser.parse("SELECT * FROM idx WHERE exists(email)")

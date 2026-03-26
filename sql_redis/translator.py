@@ -120,6 +120,7 @@ class Translator:
             or geo_requires_aggregate  # geo_distance with >, >=, BETWEEN
             or len(analyzed.date_functions) > 0
             or has_date_func_conditions
+            or len(parsed.filters) > 0  # exists() in HAVING → FILTER
         )
 
         # Build query string from conditions
@@ -358,6 +359,12 @@ class Translator:
                 # Skip computed fields (they have aliases from geo_distance)
                 if field_name not in [gs.alias for gs in parsed.geo_distance_selects]:
                     load_fields.add(field_name)
+        # Load fields referenced in exists() filters (HAVING)
+        for filter_expr in parsed.filters:
+            self._extract_exists_fields(filter_expr, load_fields)
+        # Load fields referenced in exists() computed fields (SELECT)
+        for computed in analyzed.computed_fields:
+            self._extract_exists_fields(computed.expression, load_fields)
 
         if load_fields:
             args.append("LOAD")
@@ -453,6 +460,13 @@ class Translator:
         for condition in date_func_conditions:
             filter_expr = self._build_date_function_filter(condition)
             args.extend(["FILTER", filter_expr])
+
+        # FILTER for exists() from HAVING clause
+        for filter_expr in parsed.filters:
+            prefixed = self._prefix_fields_in_expression(
+                filter_expr, analyzed.field_types
+            )
+            args.extend(["FILTER", prefixed])
 
         # GROUPBY
         if analyzed.groupby_fields:
@@ -592,6 +606,14 @@ class Translator:
                 "Supported units are 'm', 'km', 'mi', 'ft'."
             )
         return value * conversions[normalized_unit]
+
+    @staticmethod
+    def _extract_exists_fields(expression: str, load_fields: set[str]) -> None:
+        """Extract field names from exists() calls and add to load_fields."""
+        import re
+
+        for match in re.finditer(r"exists\((\w+)\)", expression):
+            load_fields.add(match.group(1))
 
     def _prefix_fields_in_expression(
         self, expression: str, schema: dict[str, str]
