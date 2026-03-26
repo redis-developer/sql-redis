@@ -254,13 +254,14 @@ class TestEdgeCases:
         for value, expected_literal in problematic_values:
             # Verify substitution produces correct SQL (no Redis round-trip needed)
             substituted = _substitute_params(sql_template, {"name": value})
-            assert expected_literal in substituted, (
-                f"Expected {expected_literal!r} in substituted SQL for value {value!r}"
-            )
+            assert (
+                expected_literal in substituted
+            ), f"Expected {expected_literal!r} in substituted SQL for value {value!r}"
 
         # Verify at least one value executes successfully against Redis
         result = param_executor.execute(
-            sql_template, params={"name": "path/to/file"},
+            sql_template,
+            params={"name": "path/to/file"},
         )
         assert isinstance(result.rows, list)
 

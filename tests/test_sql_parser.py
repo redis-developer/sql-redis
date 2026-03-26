@@ -795,13 +795,10 @@ class TestSQLParserIsNull:
         assert "IS_NULL" in operators
         assert "=" in operators
 
-
     def test_double_negation_not_is_not_null(self):
         """NOT (email IS NOT NULL) should produce IS_NULL (double negation cancels)."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM idx WHERE NOT (email IS NOT NULL)"
-        )
+        result = parser.parse("SELECT * FROM idx WHERE NOT (email IS NOT NULL)")
         assert len(result.conditions) == 1
         assert result.conditions[0].operator == "IS_NULL"
         assert result.conditions[0].field == "email"
@@ -809,9 +806,7 @@ class TestSQLParserIsNull:
     def test_double_negation_not_is_null(self):
         """NOT (email IS NULL) should produce IS_NOT_NULL."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM idx WHERE NOT (email IS NULL)"
-        )
+        result = parser.parse("SELECT * FROM idx WHERE NOT (email IS NULL)")
         assert len(result.conditions) == 1
         assert result.conditions[0].operator == "IS_NOT_NULL"
         assert result.conditions[0].field == "email"
