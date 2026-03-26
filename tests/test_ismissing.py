@@ -14,7 +14,6 @@ from sql_redis.executor import Executor
 from sql_redis.schema import SchemaRegistry
 from sql_redis.translator import Translator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
