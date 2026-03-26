@@ -239,25 +239,30 @@ class TestEdgeCases:
         The parameter substitution correctly escapes quotes, which is the main concern.
         """
         # Characters like @ and : have special meaning in Redis Search syntax.
-        # Under DIALECT 2, some previously problematic values are handled
-        # differently and may no longer raise errors.
+        # Verify parameter substitution correctly injects these values into SQL
+        # (even if Redis may reject some at execution time).
+        from sql_redis.executor import _substitute_params
+
         problematic_values = [
-            "hello@world.com",  # @ is special in Redis Search
-            "price: $100",  # : is special in Redis Search
-            "path/to/file",  # forward slashes are OK
+            ("hello@world.com", "'hello@world.com'"),
+            ("price: $100", "'price: $100'"),
+            ("path/to/file", "'path/to/file'"),
         ]
 
-        for value in problematic_values:
-            # Under DIALECT 2, these may or may not raise — just verify
-            # the parameter substitution itself doesn't crash
-            try:
-                result = param_executor.execute(
-                    f"SELECT * FROM {param_test_index} WHERE name = :name",
-                    params={"name": value},
-                )
-                assert isinstance(result.rows, list)
-            except redis.exceptions.ResponseError:
-                pass  # Expected for some special chars depending on dialect
+        sql_template = f"SELECT * FROM {param_test_index} WHERE name = :name"
+
+        for value, expected_literal in problematic_values:
+            # Verify substitution produces correct SQL (no Redis round-trip needed)
+            substituted = _substitute_params(sql_template, {"name": value})
+            assert expected_literal in substituted, (
+                f"Expected {expected_literal!r} in substituted SQL for value {value!r}"
+            )
+
+        # Verify at least one value executes successfully against Redis
+        result = param_executor.execute(
+            sql_template, params={"name": "path/to/file"},
+        )
+        assert isinstance(result.rows, list)
 
 
 class TestBugDemonstration:

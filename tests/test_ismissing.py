@@ -319,14 +319,15 @@ class TestIsMissingEdgeCases:
         )
         assert result.count == 3
 
-    def test_is_not_null_returns_none_when_all_missing(
+    def test_is_not_null_on_indexmissing_field_returns_present_docs(
         self, redis_client, missing_data
     ):
-        """IS NOT NULL on a field present on all docs returns all docs.
+        """IS NOT NULL on an INDEXMISSING optional field returns only present docs.
 
-        name is present on all 4 docs. But name doesn't have INDEXMISSING,
-        so this query would fail. Instead test with 'email' which has INDEXMISSING
-        and verify the correct count.
+        email is defined with INDEXMISSING and is present on Alice and Carol
+        (2 of the 4 docs). Querying `email IS NOT NULL` should return exactly
+        those two documents. (We cannot use `name` here because it does not
+        have INDEXMISSING configured.)
         """
         # email IS NOT NULL: Alice, Carol (2 docs)
         registry = SchemaRegistry(redis_client)

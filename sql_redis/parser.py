@@ -641,7 +641,7 @@ class SQLParser:
             self._process_where_clause(expression.this, result, negated)
             self._process_where_clause(expression.expression, result, negated)
         elif isinstance(expression, exp.Not):
-            self._process_where_clause(expression.this, result, negated=True)
+            self._process_where_clause(expression.this, result, negated=not negated)
         elif isinstance(expression, exp.Paren):
             self._process_where_clause(expression.this, result, negated=negated)
         elif isinstance(expression, exp.Is):

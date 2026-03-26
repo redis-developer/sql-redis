@@ -143,7 +143,7 @@ class Executor:
         try:
             raw_result = self._client.execute_command(*cmd)
         except redis.ResponseError as e:
-            if "ismissing" in translated.query_string:
+            if "ismissing(@" in translated.query_string:
                 raise redis.ResponseError(
                     f"{e}. The ismissing() function requires Redis 7.4+ "
                     "(RediSearch 2.10+) and the field must have INDEXMISSING "
@@ -218,13 +218,9 @@ class AsyncExecutor:
         # Execute command asynchronously
         try:
             raw_result = await self._client.execute_command(*cmd)
-        except Exception as e:
-            # redis.asyncio raises redis.ResponseError too
-            if (
-                "ismissing" in translated.query_string
-                and "ResponseError" in type(e).__name__
-            ):
-                raise type(e)(
+        except redis.ResponseError as e:
+            if "ismissing(@" in translated.query_string:
+                raise redis.ResponseError(
                     f"{e}. The ismissing() function requires Redis 7.4+ "
                     "(RediSearch 2.10+) and the field must have INDEXMISSING "
                     "declared in the schema."
