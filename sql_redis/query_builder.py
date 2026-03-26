@@ -333,7 +333,6 @@ class QueryBuilder:
 
         return self.combine_conditions(parts, "AND")
 
-
     def build_missing_condition(self, field: str, *, is_missing: bool) -> str:
         """Build ismissing() query fragment for IS NULL / IS NOT NULL.
 

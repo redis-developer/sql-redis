@@ -14,7 +14,6 @@ from sql_redis.executor import Executor
 from sql_redis.schema import SchemaRegistry
 from sql_redis.translator import Translator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -46,11 +45,21 @@ def missing_index(redis_client: redis.Redis) -> str:
         "1",
         "missing:",
         "SCHEMA",
-        "name", "TEXT", "SORTABLE",
-        "category", "TAG", "SORTABLE",
-        "email", "TAG", "INDEXMISSING",
-        "bio", "TEXT", "INDEXMISSING",
-        "score", "NUMERIC", "INDEXMISSING",
+        "name",
+        "TEXT",
+        "SORTABLE",
+        "category",
+        "TAG",
+        "SORTABLE",
+        "email",
+        "TAG",
+        "INDEXMISSING",
+        "bio",
+        "TEXT",
+        "INDEXMISSING",
+        "score",
+        "NUMERIC",
+        "INDEXMISSING",
     )
     return index_name
 
@@ -102,9 +111,7 @@ def missing_data(redis_client: redis.Redis, missing_index: str) -> str:
 
 
 @pytest.fixture
-def missing_executor(
-    redis_client: redis.Redis, missing_data: str
-) -> Executor:
+def missing_executor(redis_client: redis.Redis, missing_data: str) -> Executor:
     """Create an executor with the ismissing index loaded."""
     registry = SchemaRegistry(redis_client)
     registry.refresh(missing_data)
@@ -112,9 +119,7 @@ def missing_executor(
 
 
 @pytest.fixture
-def missing_translator(
-    redis_client: redis.Redis, missing_data: str
-) -> Translator:
+def missing_translator(redis_client: redis.Redis, missing_data: str) -> Translator:
     """Create a translator with the ismissing index loaded."""
     registry = SchemaRegistry(redis_client)
     registry.refresh(missing_data)
@@ -304,9 +309,7 @@ class TestIsMissingCombined:
 class TestIsMissingEdgeCases:
     """Edge cases for ismissing() behavior."""
 
-    def test_is_null_returns_all_when_all_missing(
-        self, missing_executor, missing_data
-    ):
+    def test_is_null_returns_all_when_all_missing(self, missing_executor, missing_data):
         """IS NULL on a field missing from most docs returns the correct count.
 
         bio is only present on Alice. IS NULL should return Bob, Carol, Dave.
@@ -359,13 +362,12 @@ class TestIsMissingEdgeCases:
         assert result[0] == 2
 
 
-
-
 class TestIsMissingErrorHandling:
     """Test error messages when ismissing() is used on unsupported schemas."""
 
     def test_ismissing_without_indexmissing_gives_clear_error(
-        self, redis_client,
+        self,
+        redis_client,
     ):
         """Using IS NULL on a field without INDEXMISSING gives a clear error."""
         # Create an index WITHOUT INDEXMISSING on the email field
@@ -376,12 +378,19 @@ class TestIsMissingErrorHandling:
             pass
 
         redis_client.execute_command(
-            "FT.CREATE", idx,
-            "ON", "HASH",
-            "PREFIX", "1", "noim:",
+            "FT.CREATE",
+            idx,
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            "noim:",
             "SCHEMA",
-            "name", "TEXT", "SORTABLE",
-            "email", "TAG",
+            "name",
+            "TEXT",
+            "SORTABLE",
+            "email",
+            "TAG",
         )
         redis_client.hset("noim:1", mapping={"name": "Alice"})
 

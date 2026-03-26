@@ -436,7 +436,6 @@ class TestTranslatorOutput:
         assert basic_index in cmd_str
 
 
-
 class TestTranslatorDialect2:
     """Tests for unconditional DIALECT 2 in all commands."""
 
@@ -465,9 +464,7 @@ class TestTranslatorDialect2:
 class TestTranslatorIsMissing:
     """Tests for IS NULL / IS NOT NULL → ismissing() translation."""
 
-    def test_is_null_produces_ismissing(
-        self, translator: Translator, basic_index: str
-    ):
+    def test_is_null_produces_ismissing(self, translator: Translator, basic_index: str):
         """WHERE field IS NULL → ismissing(@field)."""
         result = translator.translate(
             f"SELECT * FROM {basic_index} WHERE status IS NULL"
@@ -496,24 +493,18 @@ class TestTranslatorIsMissing:
         assert "ismissing(@title)" in result.query_string
         assert "@category" in result.query_string
 
-    def test_is_null_emits_warning(
-        self, translator: Translator, basic_index: str
-    ):
+    def test_is_null_emits_warning(self, translator: Translator, basic_index: str):
         """IS NULL translation emits a warning about Redis version requirement."""
         import warnings
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            translator.translate(
-                f"SELECT * FROM {basic_index} WHERE status IS NULL"
-            )
+            translator.translate(f"SELECT * FROM {basic_index} WHERE status IS NULL")
             assert len(w) == 1
             assert "Redis 7.4+" in str(w[0].message)
             assert "INDEXMISSING" in str(w[0].message)
 
-    def test_is_not_null_emits_warning(
-        self, translator: Translator, basic_index: str
-    ):
+    def test_is_not_null_emits_warning(self, translator: Translator, basic_index: str):
         """IS NOT NULL translation emits a warning about Redis version requirement."""
         import warnings
 
