@@ -587,3 +587,22 @@ class TestTranslatorExists:
             f"SELECT exists(status) AS has_status FROM {basic_index}"
         )
         assert result.args[-2:] == ["DIALECT", "2"]
+
+    def test_exists_arithmetic_loads_fields(
+        self, translator: Translator, basic_index: str
+    ):
+        """exists() in arithmetic expressions must LOAD referenced fields.
+
+        sqlglot uppercases exists() to EXISTS() in arithmetic context.
+        The LOAD extraction must be case-insensitive.
+        """
+        result = translator.translate(
+            f"SELECT exists(status) + exists(category) AS total FROM {basic_index}"
+        )
+        assert result.command == "FT.AGGREGATE"
+        assert "LOAD" in result.args
+        load_idx = result.args.index("LOAD")
+        load_count = int(result.args[load_idx + 1])
+        load_fields = result.args[load_idx + 2 : load_idx + 2 + load_count]
+        assert "@status" in load_fields
+        assert "@category" in load_fields

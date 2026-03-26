@@ -363,7 +363,6 @@ class TestIsMissingEdgeCases:
         assert result[0] == 2
 
 
-
 class TestIsMissingErrorHandling:
     """Test error messages when ismissing() is used on unsupported schemas."""
 

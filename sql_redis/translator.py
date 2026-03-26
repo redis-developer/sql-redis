@@ -612,7 +612,7 @@ class Translator:
         """Extract field names from exists() calls and add to load_fields."""
         import re
 
-        for match in re.finditer(r"exists\((\w+)\)", expression):
+        for match in re.finditer(r"exists\((\w+)\)", expression, re.IGNORECASE):
             load_fields.add(match.group(1))
 
     def _prefix_fields_in_expression(
