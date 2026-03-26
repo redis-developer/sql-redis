@@ -741,3 +741,57 @@ class TestSQLParserComplexQueries:
         assert len(result.conditions) == 1
         assert result.conditions[0].field == "category"
         assert result.limit == 5
+
+
+
+class TestSQLParserParenthesizedConditions:
+    """Tests for parenthesized WHERE conditions (exp.Paren handling)."""
+
+    def test_parenthesized_single_condition(self):
+        """Parenthesized conditions are not silently dropped."""
+        parser = SQLParser()
+        result = parser.parse("SELECT * FROM idx WHERE (status = 'active')")
+        assert len(result.conditions) == 1
+        assert result.conditions[0].field == "status"
+        assert result.conditions[0].value == "active"
+
+    def test_not_parenthesized_condition(self):
+        """NOT (...) with exp.Paren unwraps correctly."""
+        parser = SQLParser()
+        result = parser.parse("SELECT * FROM idx WHERE NOT (status = 'active')")
+        assert len(result.conditions) == 1
+        assert result.conditions[0].negated is True
+        assert result.conditions[0].field == "status"
+
+
+class TestSQLParserIsNull:
+    """Tests for IS NULL / IS NOT NULL parsing."""
+
+    def test_is_null_parsed(self):
+        """IS NULL produces IS_NULL condition."""
+        parser = SQLParser()
+        result = parser.parse("SELECT * FROM idx WHERE email IS NULL")
+        assert len(result.conditions) == 1
+        assert result.conditions[0].operator == "IS_NULL"
+        assert result.conditions[0].field == "email"
+        assert result.conditions[0].value is None
+        assert result.conditions[0].negated is False
+
+    def test_is_not_null_parsed(self):
+        """IS NOT NULL produces IS_NOT_NULL condition."""
+        parser = SQLParser()
+        result = parser.parse("SELECT * FROM idx WHERE email IS NOT NULL")
+        assert len(result.conditions) == 1
+        assert result.conditions[0].operator == "IS_NOT_NULL"
+        assert result.conditions[0].negated is False
+
+    def test_is_null_with_other_conditions(self):
+        """IS NULL alongside regular conditions."""
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT * FROM idx WHERE status = 'active' AND email IS NULL"
+        )
+        assert len(result.conditions) == 2
+        operators = {c.operator for c in result.conditions}
+        assert "IS_NULL" in operators
+        assert "=" in operators
