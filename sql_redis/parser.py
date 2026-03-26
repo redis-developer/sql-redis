@@ -659,6 +659,11 @@ class SQLParser:
                         negated=False,
                     )
                 )
+            else:
+                raise ValueError(
+                    "Unsupported IS expression in WHERE clause; only "
+                    "`column IS NULL` and `column IS NOT NULL` are supported."
+                )
         elif isinstance(expression, exp.Anonymous):
             # Custom function like MATCH(field, value)
             self._add_function_condition(expression, result, negated)

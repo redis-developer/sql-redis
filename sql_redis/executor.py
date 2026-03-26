@@ -143,9 +143,19 @@ class Executor:
         try:
             raw_result = self._client.execute_command(*cmd)
         except redis.ResponseError as e:
-            if "ismissing(@" in translated.query_string:
+            error_msg = str(e)
+            _ismissing_signatures = (
+                "Unknown function",
+                "No such function",
+                "Syntax error",
+                "INDEXMISSING",
+            )
+            if "ismissing(@" in translated.query_string and any(
+                sig in error_msg for sig in _ismissing_signatures
+            ):
                 raise redis.ResponseError(
-                    f"{e}. The ismissing() function requires Redis 7.4+ "
+                    f"{error_msg}. This error may be caused by use of the "
+                    "ismissing() function. ismissing() requires Redis 7.4+ "
                     "(RediSearch 2.10+) and the field must have INDEXMISSING "
                     "declared in the schema."
                 ) from e
@@ -219,9 +229,19 @@ class AsyncExecutor:
         try:
             raw_result = await self._client.execute_command(*cmd)
         except redis.ResponseError as e:
-            if "ismissing(@" in translated.query_string:
+            error_msg = str(e)
+            _ismissing_signatures = (
+                "Unknown function",
+                "No such function",
+                "Syntax error",
+                "INDEXMISSING",
+            )
+            if "ismissing(@" in translated.query_string and any(
+                sig in error_msg for sig in _ismissing_signatures
+            ):
                 raise redis.ResponseError(
-                    f"{e}. The ismissing() function requires Redis 7.4+ "
+                    f"{error_msg}. This error may be caused by use of the "
+                    "ismissing() function. ismissing() requires Redis 7.4+ "
                     "(RediSearch 2.10+) and the field must have INDEXMISSING "
                     "declared in the schema."
                 ) from e
