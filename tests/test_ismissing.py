@@ -14,6 +14,7 @@ from sql_redis.executor import Executor
 from sql_redis.schema import SchemaRegistry
 from sql_redis.translator import Translator
 
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -361,6 +362,7 @@ class TestIsMissingEdgeCases:
         )
         # Should return Alice and Carol (2 docs)
         assert result[0] == 2
+
 
 
 class TestIsMissingErrorHandling:

@@ -436,6 +436,7 @@ class TestTranslatorOutput:
         assert basic_index in cmd_str
 
 
+
 class TestTranslatorDialect2:
     """Tests for unconditional DIALECT 2 in all commands."""
 

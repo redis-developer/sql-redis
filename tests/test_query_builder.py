@@ -314,6 +314,7 @@ class TestQueryBuilderFullQuery:
         assert result == "*"
 
 
+
 class TestQueryBuilderMissingCondition:
     """Tests for ismissing() query syntax."""
 

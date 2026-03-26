@@ -743,6 +743,7 @@ class TestSQLParserComplexQueries:
         assert result.limit == 5
 
 
+
 class TestSQLParserParenthesizedConditions:
     """Tests for parenthesized WHERE conditions (exp.Paren handling)."""
 
