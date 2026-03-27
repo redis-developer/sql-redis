@@ -714,6 +714,8 @@ class SQLParser:
                     "exists() in HAVING expects a column reference, "
                     f"got {type(inner).__name__}."
                 )
+        elif isinstance(expression, exp.Paren):
+            self._process_having_clause(expression.this, result)
         elif isinstance(expression, exp.And):
             self._process_having_clause(expression.this, result)
             self._process_having_clause(expression.expression, result)

@@ -461,13 +461,6 @@ class Translator:
             filter_expr = self._build_date_function_filter(condition)
             args.extend(["FILTER", filter_expr])
 
-        # FILTER for exists() from HAVING clause
-        for filter_expr in parsed.filters:
-            prefixed = self._prefix_fields_in_expression(
-                filter_expr, analyzed.field_types
-            )
-            args.extend(["FILTER", prefixed])
-
         # GROUPBY
         if analyzed.groupby_fields:
             args.append("GROUPBY")
@@ -511,6 +504,13 @@ class Translator:
                 # Always provide an alias
                 alias = agg.alias or agg.function.lower()
                 args.extend(["AS", alias])
+
+        # FILTER for exists() from HAVING clause (post-aggregation)
+        for filter_expr in parsed.filters:
+            prefixed = self._prefix_fields_in_expression(
+                filter_expr, analyzed.field_types
+            )
+            args.extend(["FILTER", prefixed])
 
         # SORTBY
         if parsed.orderby_fields:
