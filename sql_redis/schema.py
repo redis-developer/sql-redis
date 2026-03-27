@@ -84,17 +84,34 @@ class SchemaRegistry:
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
 
-        Returns None if index or field is unknown.
+        Lazily loads the index schema if not already cached.
+        Returns None if index doesn't exist or field is unknown.
         """
-        schema = self._schemas.get(index, {})
+        schema = self.get_schema(index)
         return schema.get(field)
 
     def get_schema(self, index: str) -> dict[str, str]:
-        """Get full schema for an index.
+        """Get full schema for an index, loading lazily if not cached.
 
-        Returns empty dict if index is unknown.
+        On first access for a given index, issues a single FT.INFO call
+        to Redis. Subsequent calls return the cached schema with no I/O.
+
+        Returns empty dict if index does not exist in Redis.
         """
+        if index not in self._schemas:
+            self._load_index_schema(index)
         return self._schemas.get(index, {})
+
+    def invalidate(self, index: str | None = None) -> None:
+        """Invalidate cached schema(s), forcing reload on next access.
+
+        Args:
+            index: Specific index to invalidate. If None, invalidates all.
+        """
+        if index is not None:
+            self._schemas.pop(index, None)
+        else:
+            self._schemas.clear()
 
     def refresh(self, index_name: str) -> None:
         """Refresh schema for a single index.
@@ -197,17 +214,43 @@ class AsyncSchemaRegistry:
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
 
+        Note: For async lazy loading, call ensure_schema() first.
         Returns None if index or field is unknown.
         """
         schema = self._schemas.get(index, {})
         return schema.get(field)
 
     def get_schema(self, index: str) -> dict[str, str]:
-        """Get full schema for an index.
+        """Get full schema for an index (sync access to cache).
 
-        Returns empty dict if index is unknown.
+        Returns empty dict if index is not cached. Use ensure_schema()
+        to load lazily in async contexts.
         """
         return self._schemas.get(index, {})
+
+    async def ensure_schema(self, index: str) -> dict[str, str]:
+        """Ensure schema for an index is loaded, fetching lazily if needed.
+
+        This is the async equivalent of the sync get_schema() lazy path.
+        On first access for a given index, issues a single FT.INFO call.
+        Subsequent calls return the cached schema with no I/O.
+
+        Returns empty dict if index does not exist in Redis.
+        """
+        if index not in self._schemas:
+            await self._load_index_schema(index)
+        return self._schemas.get(index, {})
+
+    def invalidate(self, index: str | None = None) -> None:
+        """Invalidate cached schema(s), forcing reload on next access.
+
+        Args:
+            index: Specific index to invalidate. If None, invalidates all.
+        """
+        if index is not None:
+            self._schemas.pop(index, None)
+        else:
+            self._schemas.clear()
 
     async def refresh(self, index_name: str) -> None:
         """Refresh schema for a single index."""
