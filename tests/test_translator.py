@@ -434,3 +434,84 @@ class TestTranslatorOutput:
 
         assert cmd_str.startswith("FT.SEARCH")
         assert basic_index in cmd_str
+
+
+class TestTranslatorDialect2:
+    """Tests for unconditional DIALECT 2 in all commands."""
+
+    def test_search_includes_dialect_2(self, translator: Translator, basic_index: str):
+        """Every FT.SEARCH command ends with DIALECT 2."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status = 'active'"
+        )
+        assert result.args[-2:] == ["DIALECT", "2"]
+
+    def test_aggregate_includes_dialect_2(
+        self, translator: Translator, basic_index: str
+    ):
+        """Every FT.AGGREGATE command ends with DIALECT 2."""
+        result = translator.translate(f"SELECT COUNT(*) FROM {basic_index}")
+        assert result.args[-2:] == ["DIALECT", "2"]
+
+    def test_search_select_all_includes_dialect_2(
+        self, translator: Translator, basic_index: str
+    ):
+        """Even SELECT * includes DIALECT 2."""
+        result = translator.translate(f"SELECT * FROM {basic_index}")
+        assert result.args[-2:] == ["DIALECT", "2"]
+
+
+class TestTranslatorIsMissing:
+    """Tests for IS NULL / IS NOT NULL → ismissing() translation."""
+
+    def test_is_null_produces_ismissing(self, translator: Translator, basic_index: str):
+        """WHERE field IS NULL → ismissing(@field)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status IS NULL"
+        )
+        assert result.command == "FT.SEARCH"
+        assert result.query_string == "ismissing(@status)"
+
+    def test_is_not_null_produces_neg_ismissing(
+        self, translator: Translator, basic_index: str
+    ):
+        """WHERE field IS NOT NULL → -ismissing(@field)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status IS NOT NULL"
+        )
+        assert result.command == "FT.SEARCH"
+        assert result.query_string == "-ismissing(@status)"
+
+    def test_is_null_combined_with_other_conditions(
+        self, translator: Translator, basic_index: str
+    ):
+        """IS NULL combined with a regular TAG condition."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE category = 'electronics' AND title IS NULL"
+        )
+        assert result.command == "FT.SEARCH"
+        assert "ismissing(@title)" in result.query_string
+        assert "@category" in result.query_string
+
+    def test_is_null_emits_warning(self, translator: Translator, basic_index: str):
+        """IS NULL translation emits a warning about Redis version requirement."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            translator.translate(f"SELECT * FROM {basic_index} WHERE status IS NULL")
+            assert len(w) == 1
+            assert "Redis 7.4+" in str(w[0].message)
+            assert "INDEXMISSING" in str(w[0].message)
+
+    def test_is_not_null_emits_warning(self, translator: Translator, basic_index: str):
+        """IS NOT NULL translation emits a warning about Redis version requirement."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE status IS NOT NULL"
+            )
+            assert len(w) == 1
+            assert "Redis 7.4+" in str(w[0].message)

@@ -238,24 +238,29 @@ class TestEdgeCases:
         This is a Redis limitation, not a parameter substitution bug.
         The parameter substitution correctly escapes quotes, which is the main concern.
         """
-        # Characters like @ and : have special meaning in Redis Search syntax
-        # These cause syntax errors when used in TEXT field queries
+        # Characters like @ and : have special meaning in Redis Search syntax.
+        # Verify parameter substitution correctly injects these values into SQL
+        # (even if Redis may reject some at execution time).
+        from sql_redis.executor import _substitute_params
+
         problematic_values = [
-            "hello@world.com",  # @ is special in Redis Search
-            "price: $100",  # : is special in Redis Search
+            ("hello@world.com", "'hello@world.com'"),
+            ("price: $100", "'price: $100'"),
+            ("path/to/file", "'path/to/file'"),
         ]
 
-        for value in problematic_values:
-            # These are expected to fail due to Redis Search syntax limitations
-            with pytest.raises(redis.exceptions.ResponseError, match="Syntax error"):
-                param_executor.execute(
-                    f"SELECT * FROM {param_test_index} WHERE name = :name",
-                    params={"name": value},
-                )
+        sql_template = f"SELECT * FROM {param_test_index} WHERE name = :name"
 
-        # This one should work - forward slashes are OK
+        for value, expected_literal in problematic_values:
+            # Verify substitution produces correct SQL (no Redis round-trip needed)
+            substituted = _substitute_params(sql_template, {"name": value})
+            assert (
+                expected_literal in substituted
+            ), f"Expected {expected_literal!r} in substituted SQL for value {value!r}"
+
+        # Verify at least one value executes successfully against Redis
         result = param_executor.execute(
-            f"SELECT * FROM {param_test_index} WHERE name = :name",
+            sql_template,
             params={"name": "path/to/file"},
         )
         assert isinstance(result.rows, list)

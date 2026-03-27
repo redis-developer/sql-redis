@@ -312,3 +312,19 @@ class TestQueryBuilderFullQuery:
         result = builder.build_query_string(field_types={})
 
         assert result == "*"
+
+
+class TestQueryBuilderMissingCondition:
+    """Tests for ismissing() query syntax."""
+
+    def test_build_missing_condition_is_null(self):
+        """IS NULL produces ismissing(@field)."""
+        builder = QueryBuilder()
+        result = builder.build_missing_condition("email", is_missing=True)
+        assert result == "ismissing(@email)"
+
+    def test_build_missing_condition_is_not_null(self):
+        """IS NOT NULL produces -ismissing(@field)."""
+        builder = QueryBuilder()
+        result = builder.build_missing_condition("email", is_missing=False)
+        assert result == "-ismissing(@email)"

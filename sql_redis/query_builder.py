@@ -332,3 +332,17 @@ class QueryBuilder:
                 parts.append(self.build_tag_condition(field, operator, value))
 
         return self.combine_conditions(parts, "AND")
+
+    def build_missing_condition(self, field: str, *, is_missing: bool) -> str:
+        """Build ismissing() query fragment for IS NULL / IS NOT NULL.
+
+        Args:
+            field: Field name (without @ prefix).
+            is_missing: True for IS NULL (ismissing), False for IS NOT NULL (-ismissing).
+
+        Returns:
+            Query fragment like "ismissing(@field)" or "-ismissing(@field)".
+        """
+        if is_missing:
+            return f"ismissing(@{field})"
+        return f"-ismissing(@{field})"

@@ -641,7 +641,29 @@ class SQLParser:
             self._process_where_clause(expression.this, result, negated)
             self._process_where_clause(expression.expression, result, negated)
         elif isinstance(expression, exp.Not):
-            self._process_where_clause(expression.this, result, negated=True)
+            self._process_where_clause(expression.this, result, negated=not negated)
+        elif isinstance(expression, exp.Paren):
+            self._process_where_clause(expression.this, result, negated=negated)
+        elif isinstance(expression, exp.Is):
+            # IS NULL: exp.Is(this=Column, expression=Null())
+            # IS NOT NULL arrives here with negated=True via the exp.Not handler above
+            if isinstance(expression.this, exp.Column) and isinstance(
+                expression.expression, exp.Null
+            ):
+                operator = "IS_NOT_NULL" if negated else "IS_NULL"
+                result.conditions.append(
+                    Condition(
+                        field=expression.this.name,
+                        operator=operator,
+                        value=None,
+                        negated=False,
+                    )
+                )
+            else:
+                raise ValueError(
+                    "Unsupported IS expression in WHERE clause; only "
+                    "`column IS NULL` and `column IS NOT NULL` are supported."
+                )
         elif isinstance(expression, exp.Anonymous):
             # Custom function like MATCH(field, value)
             self._add_function_condition(expression, result, negated)

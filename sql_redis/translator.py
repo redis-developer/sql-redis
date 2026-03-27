@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
@@ -170,6 +171,18 @@ class Translator:
 
     def _build_condition(self, condition: Condition, field_type: str | None) -> str:
         """Build a single condition string based on field type."""
+        # Short-circuit for IS NULL / IS NOT NULL → ismissing()
+        if condition.operator in ("IS_NULL", "IS_NOT_NULL"):
+            warnings.warn(
+                f"IS NULL / IS NOT NULL on field '{condition.field}' requires "
+                "Redis 7.4+ (RediSearch 2.10+) with INDEXMISSING declared on "
+                "the field. Older versions will return a server error.",
+                stacklevel=4,
+            )
+            return self._query_builder.build_missing_condition(
+                condition.field, is_missing=(condition.operator == "IS_NULL")
+            )
+
         # Determine if this is a negation (either explicit or via != operator)
         operator = condition.operator
         is_negated = condition.negated or operator == "!="
@@ -257,8 +270,6 @@ class Translator:
         # Handle vector search parameters
         if analyzed.vector_search:
             args.extend(["PARAMS", "2", "vector", "$vector"])
-            args.append("DIALECT")
-            args.append("2")
             params["vector"] = None  # Placeholder for vector bytes
 
         # GEOFILTER clause for geo_distance conditions (only < and <= operators)
@@ -287,6 +298,9 @@ class Translator:
         if parsed.limit is not None:
             offset = parsed.offset or 0
             args.extend(["LIMIT", str(offset), str(parsed.limit)])
+
+        # DIALECT 2 — unconditionally appended as the last arguments
+        args.extend(["DIALECT", "2"])
 
         return TranslatedQuery(
             command="FT.SEARCH",
@@ -495,6 +509,9 @@ class Translator:
         if parsed.limit is not None:
             offset = parsed.offset or 0
             args.extend(["LIMIT", str(offset), str(parsed.limit)])
+
+        # DIALECT 2 — unconditionally appended as the last arguments
+        args.extend(["DIALECT", "2"])
 
         return TranslatedQuery(
             command="FT.AGGREGATE",
