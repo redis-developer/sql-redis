@@ -249,6 +249,10 @@ class AsyncSchemaRegistry:
         Concurrent calls for the same index share a single in-flight
         FT.INFO task instead of issuing duplicate requests.
 
+        If the in-flight task is cancelled (e.g. by invalidate()), the
+        current cache state is returned instead of propagating
+        CancelledError to callers.
+
         Returns empty dict if index does not exist in Redis.
         """
         if index in self._schemas:
@@ -256,10 +260,24 @@ class AsyncSchemaRegistry:
 
         if index not in self._loading:
             self._loading[index] = asyncio.ensure_future(self._load_index_schema(index))
+
+        task = self._loading.get(index)
+        if task is None:
+            # Task was removed (e.g. by invalidate()) before we could await it
+            return self._schemas.get(index, {})
+
         try:
-            await self._loading[index]
+            await task
+        except asyncio.CancelledError:
+            # invalidate()/refresh()/load_all() cancelled the in-flight load.
+            # Return the current (post-invalidate) cache state rather than
+            # propagating cancellation to higher-level callers.
+            return self._schemas.get(index, {})
         finally:
-            self._loading.pop(index, None)
+            # Only remove if this is still the current task for this index
+            if self._loading.get(index) is task:
+                self._loading.pop(index, None)
+
         return self._schemas.get(index, {})
 
     def invalidate(self, index: str | None = None) -> None:

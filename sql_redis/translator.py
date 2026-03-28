@@ -11,6 +11,7 @@ from sql_redis.parser import (
     SQL_TO_REDIS_DATE_FUNCTIONS,
     Condition,
     GeoDistanceCondition,
+    ParsedQuery,
     SQLParser,
     parse_date_to_timestamp,
 )
@@ -66,9 +67,24 @@ class Translator:
         Raises:
             ValueError: If SQL is invalid or references unknown index/fields.
         """
-        # Parse
         parsed = self._parser.parse(sql)
+        return self.translate_parsed(parsed)
 
+    def translate_parsed(self, parsed: ParsedQuery) -> TranslatedQuery:
+        """Translate a pre-parsed query into a Redis search command.
+
+        This avoids re-parsing SQL when the caller has already parsed it
+        (e.g., AsyncExecutor extracts the index name before translation).
+
+        Args:
+            parsed: A ParsedQuery from SQLParser.parse().
+
+        Returns:
+            TranslatedQuery with command details.
+
+        Raises:
+            ValueError: If the index or a field is unknown.
+        """
         # Get schema and analyze
         schemas = {parsed.index: self._schema_registry.get_schema(parsed.index)}
         analyzer = Analyzer(schemas)
