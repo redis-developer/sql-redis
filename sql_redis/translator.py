@@ -7,9 +7,13 @@ import warnings
 from dataclasses import dataclass, field
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
-from sql_redis.parser import (SQL_TO_REDIS_DATE_FUNCTIONS, Condition,
-                              GeoDistanceCondition, SQLParser,
-                              parse_date_to_timestamp)
+from sql_redis.parser import (
+    SQL_TO_REDIS_DATE_FUNCTIONS,
+    Condition,
+    GeoDistanceCondition,
+    SQLParser,
+    parse_date_to_timestamp,
+)
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
