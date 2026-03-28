@@ -262,7 +262,7 @@ def run_lazy_no_cache(client: redis.Redis, counter: CommandCounter, queries: lis
 
 
 def run_lazy_cached(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 3: single SchemaRegistry reused across all queries (lazy + cached)."""
+    """Mode 4: single SchemaRegistry reused across all queries (lazy + cached)."""
     counter.reset()
     per_query_ms = []
 
