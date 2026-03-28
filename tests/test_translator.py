@@ -604,3 +604,15 @@ class TestTranslatorExists:
         load_fields = result.args[load_idx + 2 : load_idx + 2 + load_count]
         assert "@status" in load_fields
         assert "@category" in load_fields
+
+    def test_select_star_with_having_uses_load_all(
+        self, translator: Translator, basic_index: str
+    ):
+        """SELECT * with HAVING forces FT.AGGREGATE and must emit LOAD *."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} HAVING exists(status)"
+        )
+        assert result.command == "FT.AGGREGATE"
+        assert "LOAD" in result.args
+        load_idx = result.args.index("LOAD")
+        assert result.args[load_idx + 1] == "*"
