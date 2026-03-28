@@ -184,7 +184,7 @@ def _build_query_list(num_queries: int) -> list[str]:
 
 
 def run_load_all(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 1: load_all() upfront, then execute all queries."""
+    """Mode 2: load_all() upfront, then execute all queries."""
     counter.reset()
     per_query_ms = []
 
