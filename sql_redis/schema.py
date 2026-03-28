@@ -78,7 +78,8 @@ class SchemaRegistry:
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
         except redis.ResponseError as e:
-            if "no such index" in str(e).lower():
+            msg = str(e).lower()
+            if "no such index" in msg or "unknown index" in msg:
                 # Index doesn't exist — cache empty dict (negative cache)
                 # to avoid repeated FT.INFO calls for the same missing index
                 self._schemas[index_name] = {}
@@ -217,7 +218,8 @@ class AsyncSchemaRegistry:
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
         except redis.ResponseError as e:
-            if "no such index" in str(e).lower():
+            msg = str(e).lower()
+            if "no such index" in msg or "unknown index" in msg:
                 # Index doesn't exist — cache empty dict (negative cache)
                 # to avoid repeated FT.INFO calls for the same missing index
                 self._schemas[index_name] = {}
