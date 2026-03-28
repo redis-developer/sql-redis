@@ -184,16 +184,16 @@ def _build_query_list(num_queries: int) -> list[str]:
 
 
 def run_load_all(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 2: load_all() upfront, then execute all queries."""
+    """load_all() once upfront, then reuse single Executor for all queries."""
     counter.reset()
     per_query_ms = []
 
     registry = SchemaRegistry(client)
     overall_start = time.perf_counter()
     registry.load_all()
+    executor = Executor(client, registry)
 
     for sql in queries:
-        executor = Executor(client, registry)
         t0 = time.perf_counter()
         executor.execute(sql)
         per_query_ms.append((time.perf_counter() - t0) * 1000)
@@ -211,7 +211,7 @@ def run_load_all(client: redis.Redis, counter: CommandCounter, queries: list[str
 
 
 def run_current_redisvl(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 2: current redisvl behavior — load_all() on every query."""
+    """Current redisvl behavior — load_all() on every query."""
     counter.reset()
     per_query_ms = []
 
@@ -237,7 +237,7 @@ def run_current_redisvl(client: redis.Redis, counter: CommandCounter, queries: l
 
 
 def run_lazy_no_cache(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 3: fresh SchemaRegistry per query (no instance-level cache)."""
+    """Fresh SchemaRegistry per query (no instance-level cache)."""
     counter.reset()
     per_query_ms = []
 
@@ -262,7 +262,7 @@ def run_lazy_no_cache(client: redis.Redis, counter: CommandCounter, queries: lis
 
 
 def run_lazy_cached(client: redis.Redis, counter: CommandCounter, queries: list[str]) -> BenchmarkResult:
-    """Mode 4: single SchemaRegistry reused across all queries (lazy + cached)."""
+    """Single SchemaRegistry reused across all queries (lazy + cached)."""
     counter.reset()
     per_query_ms = []
 
@@ -467,7 +467,7 @@ def main() -> None:
         try:
             generate_graphs(all_results)
         except ImportError:
-            print("\nmatplotlib not installed — skipping graph generation")
+            print("\nmatplotlib/numpy not installed — skipping graph generation")
 
     cleanup_redis(client)
     client.close()

@@ -78,8 +78,9 @@ class SchemaRegistry:
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
         except redis.ResponseError:
-            # Index doesn't exist or was deleted
-            self._schemas.pop(index_name, None)
+            # Index doesn't exist — cache empty dict (negative cache)
+            # to avoid repeated FT.INFO calls for the same missing index
+            self._schemas[index_name] = {}
 
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
@@ -184,12 +185,15 @@ class AsyncSchemaRegistry:
         """
         self._client = redis_client
         self._schemas: dict[str, dict[str, str]] = {}
+        self._loading: dict[str, asyncio.Task[None]] = {}
 
     async def load_all(self) -> None:
         """Load schemas for all indexes on the server.
 
         Uses asyncio.gather() to load all index schemas concurrently.
+        Cancels any in-flight ensure_schema() tasks first.
         """
+        self._cancel_all_inflight()
         self._schemas.clear()
         indexes = await self._client.execute_command("FT._LIST")
         # Decode bytes to strings
@@ -208,8 +212,9 @@ class AsyncSchemaRegistry:
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
         except redis.ResponseError:
-            # Index doesn't exist or was deleted
-            self._schemas.pop(index_name, None)
+            # Index doesn't exist — cache empty dict (negative cache)
+            # to avoid repeated FT.INFO calls for the same missing index
+            self._schemas[index_name] = {}
 
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
@@ -235,23 +240,52 @@ class AsyncSchemaRegistry:
         On first access for a given index, issues a single FT.INFO call.
         Subsequent calls return the cached schema with no I/O.
 
+        Concurrent calls for the same index share a single in-flight
+        FT.INFO task instead of issuing duplicate requests.
+
         Returns empty dict if index does not exist in Redis.
         """
-        if index not in self._schemas:
-            await self._load_index_schema(index)
+        if index in self._schemas:
+            return self._schemas[index]
+
+        if index not in self._loading:
+            self._loading[index] = asyncio.ensure_future(self._load_index_schema(index))
+        try:
+            await self._loading[index]
+        finally:
+            self._loading.pop(index, None)
         return self._schemas.get(index, {})
 
     def invalidate(self, index: str | None = None) -> None:
         """Invalidate cached schema(s), forcing reload on next access.
+
+        Also cancels any in-flight ensure_schema() tasks for the
+        invalidated index(es) to prevent stale data from being written.
 
         Args:
             index: Specific index to invalidate. If None, invalidates all.
         """
         if index is not None:
             self._schemas.pop(index, None)
+            task = self._loading.pop(index, None)
+            if task is not None:
+                task.cancel()
         else:
+            self._cancel_all_inflight()
             self._schemas.clear()
 
+    def _cancel_all_inflight(self) -> None:
+        """Cancel all in-flight loading tasks."""
+        for task in self._loading.values():
+            task.cancel()
+        self._loading.clear()
+
     async def refresh(self, index_name: str) -> None:
-        """Refresh schema for a single index."""
+        """Refresh schema for a single index.
+
+        Cancels any in-flight ensure_schema() task for this index first.
+        """
+        task = self._loading.pop(index_name, None)
+        if task is not None:
+            task.cancel()
         await self._load_index_schema(index_name)

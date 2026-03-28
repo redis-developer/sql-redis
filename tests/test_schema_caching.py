@@ -6,13 +6,18 @@ Tests run against a real Redis 8 instance to verify end-to-end behavior:
 - invalidate() clears cached schemas, forcing reload on next access
 - load_all() backward compatibility is preserved
 - Executor works with lazy-loaded registry
+- Negative caching: missing indexes are cached as {} to avoid repeated FT.INFO
+- Async: ensure_schema(), invalidate(), concurrency guard
 """
+
+import asyncio
 
 import pytest
 import redis
+import redis.asyncio as async_redis
 
-from sql_redis.executor import Executor
-from sql_redis.schema import SchemaRegistry
+from sql_redis.executor import AsyncExecutor, Executor
+from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -315,3 +320,326 @@ class TestLazySchemaWithExecutor:
         assert result2.count == 1
         # Same dict object — was not re-fetched
         assert schema_after_first is schema_after_second
+
+
+# ---------------------------------------------------------------------------
+# Tests: Negative caching (sync)
+# ---------------------------------------------------------------------------
+
+
+class TestNegativeCaching:
+    """Missing indexes are cached as {} to avoid repeated FT.INFO calls."""
+
+    def test_missing_index_cached_as_empty_dict(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """get_schema() for a missing index caches {} so next call skips FT.INFO."""
+        registry = SchemaRegistry(redis_client)
+        schema = registry.get_schema("totally_missing_index")
+
+        assert schema == {}
+        # The empty dict should now be in _schemas (negative cache)
+        assert "totally_missing_index" in registry._schemas
+        assert registry._schemas["totally_missing_index"] == {}
+
+    def test_missing_index_no_repeated_ftinfo(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """Second call for a missing index returns cached {} without I/O."""
+        registry = SchemaRegistry(redis_client)
+        schema1 = registry.get_schema("totally_missing_index")
+        schema2 = registry.get_schema("totally_missing_index")
+
+        assert schema1 == {}
+        assert schema2 == {}
+        # Same object — not re-fetched
+        assert schema1 is schema2
+
+    def test_invalidate_clears_negative_cache(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """invalidate() clears negative cache entries too."""
+        registry = SchemaRegistry(redis_client)
+        registry.get_schema("totally_missing_index")
+        assert "totally_missing_index" in registry._schemas
+
+        registry.invalidate("totally_missing_index")
+        assert "totally_missing_index" not in registry._schemas
+
+
+# ---------------------------------------------------------------------------
+# Async fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def async_caching_client(redis_container) -> async_redis.Redis:
+    """Create an async Redis client for caching tests."""
+    client = async_redis.Redis(
+        host=redis_container.get_container_host_ip(),
+        port=int(redis_container.get_exposed_port(6379)),
+        decode_responses=True,
+    )
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture
+async def async_caching_indexes(
+    async_caching_client: async_redis.Redis,
+) -> list[str]:
+    """Create indexes for async caching tests."""
+    index_configs = [
+        (
+            "async_cache_products",
+            "acacheprod:",
+            ["title", "TEXT", "SORTABLE", "price", "NUMERIC", "category", "TAG"],
+        ),
+        (
+            "async_cache_users",
+            "acacheuser:",
+            ["name", "TEXT", "email", "TAG", "age", "NUMERIC"],
+        ),
+    ]
+
+    created = []
+    for index_name, prefix, fields in index_configs:
+        try:
+            await async_caching_client.execute_command("FT.DROPINDEX", index_name, "DD")
+        except Exception:
+            pass
+        await async_caching_client.execute_command(
+            "FT.CREATE",
+            index_name,
+            "ON",
+            "HASH",
+            "PREFIX",
+            "1",
+            prefix,
+            "SCHEMA",
+            *fields,
+        )
+        created.append(index_name)
+
+    yield created
+
+    for index_name in created:
+        try:
+            await async_caching_client.execute_command("FT.DROPINDEX", index_name, "DD")
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Tests: Async ensure_schema() lazy loading
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncEnsureSchema:
+    """ensure_schema() lazily loads index schema via FT.INFO on cache miss."""
+
+    async def test_ensure_schema_loads_on_first_call(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """ensure_schema() fetches schema via FT.INFO on first call."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema = await registry.ensure_schema("async_cache_products")
+
+        assert schema == {"title": "TEXT", "price": "NUMERIC", "category": "TAG"}
+
+    async def test_ensure_schema_caches_after_first_call(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Second ensure_schema() returns the same cached dict object."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema1 = await registry.ensure_schema("async_cache_products")
+        schema2 = await registry.ensure_schema("async_cache_products")
+
+        assert schema1 == schema2
+        assert schema1 is schema2
+
+    async def test_ensure_schema_only_loads_requested_index(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """ensure_schema() only loads the requested index."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_cache_products")
+
+        assert "async_cache_products" in registry._schemas
+        assert "async_cache_users" not in registry._schemas
+
+
+# ---------------------------------------------------------------------------
+# Tests: Async negative caching
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncNegativeCaching:
+    """Missing indexes are cached as {} in async registry too."""
+
+    async def test_missing_index_cached_as_empty_dict(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """ensure_schema() for a missing index caches {}."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema = await registry.ensure_schema("async_totally_missing")
+
+        assert schema == {}
+        assert "async_totally_missing" in registry._schemas
+        assert registry._schemas["async_totally_missing"] == {}
+
+    async def test_missing_index_no_repeated_ftinfo(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Second ensure_schema() for a missing index returns cached {}."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema1 = await registry.ensure_schema("async_totally_missing")
+        schema2 = await registry.ensure_schema("async_totally_missing")
+
+        assert schema1 == {}
+        assert schema1 is schema2
+
+
+# ---------------------------------------------------------------------------
+# Tests: Async invalidate()
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncInvalidate:
+    """invalidate() clears cached schemas in async registry."""
+
+    async def test_invalidate_specific_index(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """invalidate(index) removes only that index from the cache."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_cache_products")
+        await registry.ensure_schema("async_cache_users")
+
+        registry.invalidate("async_cache_products")
+
+        assert "async_cache_products" not in registry._schemas
+        assert "async_cache_users" in registry._schemas
+
+    async def test_invalidate_all(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """invalidate() with no args clears all cached schemas."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_cache_products")
+        await registry.ensure_schema("async_cache_users")
+
+        registry.invalidate()
+
+        assert len(registry._schemas) == 0
+
+    async def test_invalidate_then_ensure_reloads(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """After invalidate(), ensure_schema() re-fetches via FT.INFO."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema_before = await registry.ensure_schema("async_cache_products")
+
+        registry.invalidate("async_cache_products")
+        schema_after = await registry.ensure_schema("async_cache_products")
+
+        assert schema_after == schema_before
+        assert schema_after is not schema_before
+
+    async def test_invalidate_clears_negative_cache(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """invalidate() clears negative cache entries."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_totally_missing")
+        assert "async_totally_missing" in registry._schemas
+
+        registry.invalidate("async_totally_missing")
+        assert "async_totally_missing" not in registry._schemas
+
+
+# ---------------------------------------------------------------------------
+# Tests: Async concurrency guard
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncConcurrencyGuard:
+    """Concurrent ensure_schema() calls share one in-flight FT.INFO task."""
+
+    async def test_concurrent_ensure_schema_same_result(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Two concurrent ensure_schema() calls get the same cached dict."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema1, schema2 = await asyncio.gather(
+            registry.ensure_schema("async_cache_products"),
+            registry.ensure_schema("async_cache_products"),
+        )
+
+        assert schema1 == {"title": "TEXT", "price": "NUMERIC", "category": "TAG"}
+        assert schema1 is schema2
+
+    async def test_concurrent_ensure_schema_different_indexes(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Concurrent loads of different indexes both succeed."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        schema_products, schema_users = await asyncio.gather(
+            registry.ensure_schema("async_cache_products"),
+            registry.ensure_schema("async_cache_users"),
+        )
+
+        assert "title" in schema_products
+        assert "name" in schema_users
+
+    async def test_invalidate_during_no_inflight(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """invalidate() after load clears in-flight tracking."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_cache_products")
+
+        registry.invalidate("async_cache_products")
+
+        # Should be able to re-load cleanly
+        schema = await registry.ensure_schema("async_cache_products")
+        assert schema == {"title": "TEXT", "price": "NUMERIC", "category": "TAG"}
+
+    async def test_load_all_clears_inflight(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """load_all() clears in-flight tracking and loads everything."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        await registry.ensure_schema("async_cache_products")
+
+        await registry.load_all()
+
+        # Both indexes should be loaded
+        assert "async_cache_products" in registry._schemas
+        assert "async_cache_users" in registry._schemas
