@@ -1,5 +1,7 @@
 """Tests for the SQL to Redis Translator."""
 
+import warnings
+
 import pytest
 import redis
 
@@ -495,8 +497,6 @@ class TestTranslatorIsMissing:
 
     def test_is_null_emits_warning(self, translator: Translator, basic_index: str):
         """IS NULL translation emits a warning about Redis version requirement."""
-        import warnings
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             translator.translate(f"SELECT * FROM {basic_index} WHERE status IS NULL")
@@ -506,8 +506,6 @@ class TestTranslatorIsMissing:
 
     def test_is_not_null_emits_warning(self, translator: Translator, basic_index: str):
         """IS NOT NULL translation emits a warning about Redis version requirement."""
-        import warnings
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             translator.translate(

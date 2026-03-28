@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Callable
 
 import redis
@@ -172,8 +173,6 @@ class AsyncSchemaRegistry:
 
         Uses asyncio.gather() to load all index schemas concurrently.
         """
-        import asyncio
-
         self._schemas.clear()
         indexes = await self._client.execute_command("FT._LIST")
         # Decode bytes to strings

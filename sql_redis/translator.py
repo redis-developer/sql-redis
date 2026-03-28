@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass, field
 
@@ -610,8 +611,6 @@ class Translator:
     @staticmethod
     def _extract_exists_fields(expression: str, load_fields: set[str]) -> None:
         """Extract field names from exists() calls and add to load_fields."""
-        import re
-
         for match in re.finditer(r"exists\((\w+)\)", expression, re.IGNORECASE):
             load_fields.add(match.group(1))
 
@@ -619,8 +618,6 @@ class Translator:
         self, expression: str, schema: dict[str, str]
     ) -> str:
         """Prefix field names with @ in an expression for Redis APPLY."""
-        import re
-
         result = expression
         for field_name in schema:
             # Match field name as a whole word, not already prefixed with @

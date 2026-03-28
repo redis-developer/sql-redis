@@ -7,6 +7,8 @@ Tests run against a real Redis 8 instance to verify end-to-end behavior:
 - Combined conditions (IS NULL with other filters)
 """
 
+import warnings
+
 import pytest
 import redis
 
@@ -410,8 +412,6 @@ class TestIsMissingErrorHandling:
 
     def test_is_null_translation_emits_warning(self, missing_translator, missing_data):
         """IS NULL translation emits a warning about Redis version requirement."""
-        import warnings
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             missing_translator.translate(
