@@ -269,7 +269,11 @@ class AsyncSchemaRegistry:
             return self._schemas.get(index, {})
 
         try:
-            await task
+            # Shield the shared task so that caller cancellation (e.g.
+            # asyncio.wait_for timeout) does not cancel the shared FT.INFO
+            # for other awaiters. invalidate()/refresh()/load_all() still
+            # cancel the underlying task directly via task.cancel().
+            await asyncio.shield(task)
         except asyncio.CancelledError:
             if not task.cancelled():
                 # The shared load task is still running — this CancelledError
