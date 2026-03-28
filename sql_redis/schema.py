@@ -157,7 +157,9 @@ class SchemaRegistry:
         # Get current indexes from Redis
         current_indexes = set(self._client.execute_command("FT._LIST"))
 
-        cached_indexes = set(self._schemas.keys())
+        # Exclude negative-cached (empty) schemas so they don't trigger
+        # spurious "dropped" events or hide newly created indexes.
+        cached_indexes = {k for k, v in self._schemas.items() if v}
 
         # Detect new indexes
         new_indexes = current_indexes - cached_indexes
@@ -269,6 +271,11 @@ class AsyncSchemaRegistry:
         try:
             await task
         except asyncio.CancelledError:
+            if not task.cancelled():
+                # The shared load task is still running — this CancelledError
+                # came from the *caller* being cancelled (e.g. asyncio.wait_for
+                # timeout). Propagate so the caller actually aborts.
+                raise
             # invalidate()/refresh()/load_all() cancelled the in-flight load.
             # Return the current (post-invalidate) cache state rather than
             # propagating cancellation to higher-level callers.

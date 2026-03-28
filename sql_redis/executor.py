@@ -208,7 +208,7 @@ class AsyncExecutor:
 
         # Parse once, ensure schema is loaded (async lazy-load), then
         # translate from the pre-parsed result to avoid double-parsing.
-        parsed = self._translator._parser.parse(sql)
+        parsed = self._translator.parse(sql)
         if parsed.index:
             await self._schema_registry.ensure_schema(parsed.index)
 

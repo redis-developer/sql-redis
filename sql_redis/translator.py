@@ -55,6 +55,20 @@ class Translator:
         self._parser = SQLParser()
         self._query_builder = QueryBuilder()
 
+    def parse(self, sql: str) -> ParsedQuery:
+        """Parse a SQL SELECT into a ParsedQuery AST.
+
+        Useful when callers need the parsed result before translation
+        (e.g., to extract the index name for async schema loading).
+
+        Args:
+            sql: SQL SELECT statement.
+
+        Returns:
+            ParsedQuery with extracted index, fields, conditions, etc.
+        """
+        return self._parser.parse(sql)
+
     def translate(self, sql: str) -> TranslatedQuery:
         """Translate a SQL SELECT into a Redis search command.
 
