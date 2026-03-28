@@ -155,8 +155,12 @@ class SchemaRegistry:
         if not self._watching:
             return
 
-        # Get current indexes from Redis
-        current_indexes = set(self._client.execute_command("FT._LIST"))
+        # Get current indexes from Redis (decode bytes to str for comparison)
+        raw_indexes = self._client.execute_command("FT._LIST")
+        current_indexes = {
+            idx.decode("utf-8") if isinstance(idx, bytes) else idx
+            for idx in raw_indexes
+        }
 
         # Exclude negative-cached (empty) schemas so they don't trigger
         # spurious "dropped" events or hide newly created indexes.

@@ -82,19 +82,17 @@ class BenchmarkResult:
 
     @property
     def p95_ms(self) -> float:
-        if not self.per_query_ms:
-            return 0
-        sorted_vals = sorted(self.per_query_ms)
-        idx = int(len(sorted_vals) * 0.95)
-        return sorted_vals[min(idx, len(sorted_vals) - 1)]
+        if len(self.per_query_ms) < 2:
+            return self.per_query_ms[0] if self.per_query_ms else 0
+        # statistics.quantiles with n=20 gives 19 evenly-spaced cut points;
+        # index 18 (last) is the 95th percentile.
+        return statistics.quantiles(self.per_query_ms, n=20)[18]
 
     @property
     def p99_ms(self) -> float:
-        if not self.per_query_ms:
-            return 0
-        sorted_vals = sorted(self.per_query_ms)
-        idx = int(len(sorted_vals) * 0.99)
-        return sorted_vals[min(idx, len(sorted_vals) - 1)]
+        if len(self.per_query_ms) < 2:
+            return self.per_query_ms[0] if self.per_query_ms else 0
+        return statistics.quantiles(self.per_query_ms, n=100)[98]
 
 
 # ---------------------------------------------------------------------------
