@@ -406,7 +406,7 @@ async def async_caching_indexes(
     for index_name, prefix, fields in index_configs:
         try:
             await async_caching_client.execute_command("FT.DROPINDEX", index_name, "DD")
-        except Exception:
+        except redis.ResponseError:
             pass
         await async_caching_client.execute_command(
             "FT.CREATE",
@@ -426,8 +426,30 @@ async def async_caching_indexes(
     for index_name in created:
         try:
             await async_caching_client.execute_command("FT.DROPINDEX", index_name, "DD")
-        except Exception:
+        except redis.ResponseError:
             pass
+
+
+@pytest.fixture
+async def async_caching_data(
+    async_caching_client: async_redis.Redis,
+    async_caching_indexes: list[str],
+) -> list[str]:
+    """Populate the async_cache_products index with test data.
+
+    Documents:
+        acacheprod:1  title=Laptop   price=999  category=electronics
+        acacheprod:2  title=Book     price=29   category=books
+    """
+    await async_caching_client.hset(
+        "acacheprod:1",
+        mapping={"title": "Laptop", "price": "999", "category": "electronics"},
+    )
+    await async_caching_client.hset(
+        "acacheprod:2",
+        mapping={"title": "Book", "price": "29", "category": "books"},
+    )
+    return async_caching_indexes
 
 
 # ---------------------------------------------------------------------------
@@ -643,3 +665,52 @@ class TestAsyncConcurrencyGuard:
         # Both indexes should be loaded
         assert "async_cache_products" in registry._schemas
         assert "async_cache_users" in registry._schemas
+
+
+# ---------------------------------------------------------------------------
+# Tests: Async executor lazy-load (no load_all() required)
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncLazySchemaWithExecutor:
+    """AsyncExecutor works correctly with lazy-loaded registry (no load_all())."""
+
+    async def test_async_executor_works_without_load_all(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_data: list[str],
+    ):
+        """AsyncExecutor can execute queries without calling load_all() first."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        # No load_all() — executor will lazy-load via ensure_schema()
+        executor = AsyncExecutor(async_caching_client, registry)
+
+        result = await executor.execute(
+            "SELECT * FROM async_cache_products WHERE category = 'electronics'"
+        )
+        assert result.count == 1
+        assert result.rows[0]["title"] == "Laptop"
+
+    async def test_async_executor_multiple_queries_reuse_cache(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_data: list[str],
+    ):
+        """Multiple async queries reuse the same cached schema."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+        executor = AsyncExecutor(async_caching_client, registry)
+
+        result1 = await executor.execute(
+            "SELECT * FROM async_cache_products WHERE category = 'electronics'"
+        )
+        schema_after_first = registry._schemas.get("async_cache_products")
+
+        result2 = await executor.execute(
+            "SELECT * FROM async_cache_products WHERE category = 'books'"
+        )
+        schema_after_second = registry._schemas.get("async_cache_products")
+
+        assert result1.count == 1
+        assert result2.count == 1
+        # Same dict object — was not re-fetched
+        assert schema_after_first is schema_after_second

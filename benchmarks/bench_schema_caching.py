@@ -119,15 +119,17 @@ BENCH_QUERIES = [
 # ---------------------------------------------------------------------------
 def setup_redis(client: redis.Redis, num_background_indexes: int = 10) -> None:
     """Create target index + background indexes with sample data."""
-    # Clean up any existing indexes
+    # Clean up benchmark-owned indexes only (avoid dropping unrelated indexes)
+    _bench_prefixes = ("bench_", "bg_index_")
     try:
         existing = client.execute_command("FT._LIST")
         for idx in existing:
             idx_name = idx.decode("utf-8") if isinstance(idx, bytes) else idx
-            try:
-                client.execute_command("FT.DROPINDEX", idx_name, "DD")
-            except redis.ResponseError:
-                pass
+            if idx_name.startswith(_bench_prefixes):
+                try:
+                    client.execute_command("FT.DROPINDEX", idx_name, "DD")
+                except redis.ResponseError:
+                    pass
     except redis.ResponseError:
         pass
 

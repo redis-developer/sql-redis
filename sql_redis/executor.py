@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import redis
 
+from sql_redis.parser import SQLParser
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 from sql_redis.translator import Translator
 
@@ -198,6 +199,7 @@ class AsyncExecutor:
         self._client = client
         self._schema_registry = schema_registry
         self._translator = Translator(schema_registry)
+        self._parser = SQLParser()
 
     async def execute(self, sql: str, *, params: dict | None = None) -> QueryResult:
         """Execute a SQL query asynchronously and return results."""
@@ -205,6 +207,13 @@ class AsyncExecutor:
 
         # Substitute non-bytes params in SQL
         sql = _substitute_params(sql, params)
+
+        # Ensure schema is loaded before translation (async lazy-load).
+        # Parse SQL to extract the index name, then call ensure_schema()
+        # so the translator's sync get_schema() finds cached data.
+        parsed = self._parser.parse(sql)
+        if parsed.index:
+            await self._schema_registry.ensure_schema(parsed.index)
 
         # Translate SQL to Redis command (sync - no Redis calls)
         translated = self._translator.translate(sql)

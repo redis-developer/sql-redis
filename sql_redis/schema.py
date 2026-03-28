@@ -77,10 +77,13 @@ class SchemaRegistry:
             info = self._client.execute_command("FT.INFO", index_name)
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
-        except redis.ResponseError:
-            # Index doesn't exist — cache empty dict (negative cache)
-            # to avoid repeated FT.INFO calls for the same missing index
-            self._schemas[index_name] = {}
+        except redis.ResponseError as e:
+            if "no such index" in str(e).lower():
+                # Index doesn't exist — cache empty dict (negative cache)
+                # to avoid repeated FT.INFO calls for the same missing index
+                self._schemas[index_name] = {}
+            else:
+                raise
 
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
@@ -211,10 +214,13 @@ class AsyncSchemaRegistry:
             info = await self._client.execute_command("FT.INFO", index_name)
             schema = _parse_schema_from_info(info)
             self._schemas[index_name] = schema
-        except redis.ResponseError:
-            # Index doesn't exist — cache empty dict (negative cache)
-            # to avoid repeated FT.INFO calls for the same missing index
-            self._schemas[index_name] = {}
+        except redis.ResponseError as e:
+            if "no such index" in str(e).lower():
+                # Index doesn't exist — cache empty dict (negative cache)
+                # to avoid repeated FT.INFO calls for the same missing index
+                self._schemas[index_name] = {}
+            else:
+                raise
 
     def get_field_type(self, index: str, field: str) -> str | None:
         """Get field type for a given index and field.
