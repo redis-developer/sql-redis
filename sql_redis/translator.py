@@ -99,7 +99,7 @@ class Translator:
         Raises:
             ValueError: If the index or a field is unknown.
         """
-        # Get schema and analyze — raise early for missing/negative-cached indexes
+        # Get schema and analyze — raise early for missing indexes
         schema = self._schema_registry.get_schema(parsed.index)
         if not schema:
             raise ValueError(f"Unknown index: {parsed.index}")

@@ -72,7 +72,12 @@ class SchemaRegistry:
             self._load_index_schema(index_name)
 
     def _load_index_schema(self, index_name: str) -> None:
-        """Load schema for a single index."""
+        """Load schema for a single index.
+
+        If the index exists, caches its schema. If the index does not exist,
+        removes it from the cache (if present) so the next access retries
+        FT.INFO — allowing recovery when an index is created after first access.
+        """
         try:
             info = self._client.execute_command("FT.INFO", index_name)
             schema = _parse_schema_from_info(info)
@@ -80,9 +85,9 @@ class SchemaRegistry:
         except redis.ResponseError as e:
             msg = str(e).lower()
             if "no such index" in msg or "unknown index" in msg:
-                # Index doesn't exist — cache empty dict (negative cache)
-                # to avoid repeated FT.INFO calls for the same missing index
-                self._schemas[index_name] = {}
+                # Index doesn't exist — remove from cache so the next
+                # get_schema() call retries FT.INFO (transient miss recovery).
+                self._schemas.pop(index_name, None)
             else:
                 raise
 
@@ -121,9 +126,8 @@ class SchemaRegistry:
     def refresh(self, index_name: str) -> None:
         """Refresh schema for a single index.
 
-        If the index no longer exists, it is negative-cached as an empty dict
-        (``{}``) to avoid repeated FT.INFO calls. If the index is new or
-        changed, updates its cached schema.
+        If the index no longer exists, removes it from the registry.
+        If the index is new or changed, updates its cached schema.
         """
         self._load_index_schema(index_name)
 
@@ -163,9 +167,7 @@ class SchemaRegistry:
             for idx in raw_indexes
         }
 
-        # Exclude negative-cached (empty) schemas so they don't trigger
-        # spurious "dropped" events or hide newly created indexes.
-        cached_indexes = {k for k, v in self._schemas.items() if v}
+        cached_indexes = set(self._schemas.keys())
 
         # Detect new indexes
         new_indexes = current_indexes - cached_indexes
@@ -217,7 +219,12 @@ class AsyncSchemaRegistry:
         )
 
     async def _load_index_schema(self, index_name: str) -> None:
-        """Load schema for a single index."""
+        """Load schema for a single index.
+
+        If the index exists, caches its schema. If the index does not exist,
+        removes it from the cache (if present) so the next access retries
+        FT.INFO — allowing recovery when an index is created after first access.
+        """
         try:
             info = await self._client.execute_command("FT.INFO", index_name)
             schema = _parse_schema_from_info(info)
@@ -225,9 +232,9 @@ class AsyncSchemaRegistry:
         except redis.ResponseError as e:
             msg = str(e).lower()
             if "no such index" in msg or "unknown index" in msg:
-                # Index doesn't exist — cache empty dict (negative cache)
-                # to avoid repeated FT.INFO calls for the same missing index
-                self._schemas[index_name] = {}
+                # Index doesn't exist — remove from cache so the next
+                # ensure_schema() call retries FT.INFO (transient miss recovery).
+                self._schemas.pop(index_name, None)
             else:
                 raise
 
@@ -268,7 +275,7 @@ class AsyncSchemaRegistry:
             return self._schemas[index]
 
         if index not in self._loading:
-            new_task = asyncio.ensure_future(self._load_index_schema(index))
+            new_task = asyncio.create_task(self._load_index_schema(index))
             self._loading[index] = new_task
 
             # Attach a done-callback to clean up _loading even if all
@@ -340,8 +347,7 @@ class AsyncSchemaRegistry:
         """Refresh schema for a single index.
 
         Cancels any in-flight ensure_schema() task for this index first.
-        If the index no longer exists, it is negative-cached as an empty dict
-        (``{}``) to avoid repeated FT.INFO calls.
+        If the index no longer exists, removes it from the registry.
         """
         task = self._loading.pop(index_name, None)
         if task is not None:
