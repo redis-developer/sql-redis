@@ -268,12 +268,23 @@ class AsyncSchemaRegistry:
             return self._schemas[index]
 
         if index not in self._loading:
-            self._loading[index] = asyncio.ensure_future(self._load_index_schema(index))
+            new_task = asyncio.ensure_future(self._load_index_schema(index))
+            self._loading[index] = new_task
 
-        task = self._loading.get(index)
-        if task is None:
+            # Attach a done-callback to clean up _loading even if all
+            # awaiters are cancelled (no finally block would run).
+            def _cleanup_loading(t: asyncio.Task[None], _index: str = index) -> None:
+                if self._loading.get(_index) is t:
+                    self._loading.pop(_index, None)
+
+            new_task.add_done_callback(_cleanup_loading)
+
+        maybe_task = self._loading.get(index)
+        if maybe_task is None:
             # Task was removed (e.g. by invalidate()) before we could await it
             return self._schemas.get(index, {})
+
+        task = maybe_task  # narrowed to non-None
 
         try:
             # Shield the shared task so that caller cancellation (e.g.

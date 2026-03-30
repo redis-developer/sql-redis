@@ -86,13 +86,13 @@ class BenchmarkResult:
             return self.per_query_ms[0] if self.per_query_ms else 0
         # statistics.quantiles with n=20 gives 19 evenly-spaced cut points;
         # index 18 (last) is the 95th percentile.
-        return statistics.quantiles(self.per_query_ms, n=20)[18]
+        return statistics.quantiles(self.per_query_ms, n=20, method="inclusive")[18]
 
     @property
     def p99_ms(self) -> float:
         if len(self.per_query_ms) < 2:
             return self.per_query_ms[0] if self.per_query_ms else 0
-        return statistics.quantiles(self.per_query_ms, n=100)[98]
+        return statistics.quantiles(self.per_query_ms, n=100, method="inclusive")[98]
 
 
 # ---------------------------------------------------------------------------
