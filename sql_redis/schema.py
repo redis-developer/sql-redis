@@ -121,8 +121,9 @@ class SchemaRegistry:
     def refresh(self, index_name: str) -> None:
         """Refresh schema for a single index.
 
-        If the index no longer exists, removes it from the registry.
-        If the index is new, adds it to the registry.
+        If the index no longer exists, it is negative-cached as an empty dict
+        (``{}``) to avoid repeated FT.INFO calls. If the index is new or
+        changed, updates its cached schema.
         """
         self._load_index_schema(index_name)
 
@@ -292,7 +293,10 @@ class AsyncSchemaRegistry:
             return self._schemas.get(index, {})
         finally:
             # Only remove if this is still the current task for this index
-            if self._loading.get(index) is task:
+            # and the underlying task has finished. If the caller was
+            # cancelled while the shielded task continues running, keep it
+            # registered so other callers still share the same in-flight task.
+            if self._loading.get(index) is task and task.done():
                 self._loading.pop(index, None)
 
         return self._schemas.get(index, {})
@@ -325,6 +329,8 @@ class AsyncSchemaRegistry:
         """Refresh schema for a single index.
 
         Cancels any in-flight ensure_schema() task for this index first.
+        If the index no longer exists, it is negative-cached as an empty dict
+        (``{}``) to avoid repeated FT.INFO calls.
         """
         task = self._loading.pop(index_name, None)
         if task is not None:
