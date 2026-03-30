@@ -218,6 +218,7 @@ class ParsedQuery:
     )  # (field, ASC|DESC)
     limit: int | None = None
     offset: int | None = None
+    filters: list[str] = dataclasses.field(default_factory=list)
 
 
 class SQLParser:
@@ -259,6 +260,11 @@ class SQLParser:
             for expr in group.expressions:
                 if isinstance(expr, exp.Column):
                     result.groupby_fields.append(expr.name)
+
+        # Extract HAVING clause — exists() in HAVING → FILTER
+        having = ast.find(exp.Having)
+        if having:
+            self._process_having_clause(having.this, result)
 
         # Extract ORDER BY clause
         order = ast.find(exp.Order)
@@ -392,6 +398,24 @@ class SQLParser:
                     extra_args=extra_args,
                 )
             )
+        elif isinstance(expression, exp.Exists):
+            # exists(field) — RediSearch aggregation function
+            # sqlglot parses exists(col) as exp.Exists(this=Column),
+            # distinct from EXISTS (SELECT ...) which has this=Select.
+            inner = expression.this
+            if isinstance(inner, exp.Column):
+                field_name = inner.name
+                expr_str = f"exists({field_name})"
+                field_alias = alias if alias else f"exists_{field_name}"
+                result.computed_fields.append(
+                    ComputedField(expression=expr_str, alias=field_alias)
+                )
+            else:
+                raise ValueError(
+                    "exists() in SELECT expects a column reference, "
+                    f"got {type(inner).__name__}. "
+                    "Use exists(field_name) for RediSearch field existence checks."
+                )
         elif isinstance(expression, exp.Anonymous):
             # Custom function call (e.g., vector_distance) - check before exp.Func
             # since Anonymous is a subclass of Func
@@ -664,9 +688,42 @@ class SQLParser:
                     "Unsupported IS expression in WHERE clause; only "
                     "`column IS NULL` and `column IS NOT NULL` are supported."
                 )
+        elif isinstance(expression, exp.Exists):
+            # Distinguish exists(column) from EXISTS (SELECT ...)
+            inner = expression.this
+            if isinstance(inner, exp.Column):
+                # exists(field) — RediSearch aggregate function, not valid in WHERE
+                raise ValueError(
+                    "exists() is a RediSearch aggregate function and cannot be "
+                    "used in WHERE clauses. Use HAVING exists(field) instead "
+                    "for post-aggregate filtering."
+                )
+            # EXISTS (SELECT ...) — SQL subquery, silently ignored (not supported)
         elif isinstance(expression, exp.Anonymous):
             # Custom function like MATCH(field, value)
             self._add_function_condition(expression, result, negated)
+
+    def _process_having_clause(self, expression, result: ParsedQuery) -> None:
+        """Process HAVING clause — routes exists() to filters."""
+        if isinstance(expression, exp.Exists):
+            inner = expression.this
+            if isinstance(inner, exp.Column):
+                result.filters.append(f"exists({inner.name})")
+            else:
+                raise ValueError(
+                    "exists() in HAVING expects a column reference, "
+                    f"got {type(inner).__name__}."
+                )
+        elif isinstance(expression, exp.Paren):
+            self._process_having_clause(expression.this, result)
+        elif isinstance(expression, exp.And):
+            self._process_having_clause(expression.this, result)
+            self._process_having_clause(expression.expression, result)
+        else:
+            raise ValueError(
+                f"Unsupported HAVING expression: {type(expression).__name__}. "
+                "Only exists(field) is supported in HAVING."
+            )
 
     def _add_condition(
         self, expression, operator: str, result: ParsedQuery, negated: bool

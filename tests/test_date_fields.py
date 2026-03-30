@@ -1,8 +1,10 @@
 """Tests for DATE/DATETIME literal parsing and conversion."""
 
 import pytest
+import redis as redis_lib
 
 from sql_redis.parser import SQLParser
+from sql_redis.schema import SchemaRegistry
 from sql_redis.translator import Translator
 
 
@@ -126,8 +128,6 @@ class TestDateTranslation:
     @pytest.fixture
     def date_index(self, redis_client):
         """Create an index with NUMERIC field for dates."""
-        import redis as redis_lib
-
         index_name = "test_dates"
         try:
             redis_client.execute_command("FT.DROPINDEX", index_name, "DD")
@@ -153,8 +153,6 @@ class TestDateTranslation:
     @pytest.fixture
     def date_translator(self, redis_client, date_index):
         """Create a translator with the date index loaded."""
-        from sql_redis.schema import SchemaRegistry
-
         registry = SchemaRegistry(redis_client)
         registry.load_all()
         return Translator(registry)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass, field
 
@@ -120,6 +121,7 @@ class Translator:
             or geo_requires_aggregate  # geo_distance with >, >=, BETWEEN
             or len(analyzed.date_functions) > 0
             or has_date_func_conditions
+            or len(parsed.filters) > 0  # exists() in HAVING → FILTER
         )
 
         # Build query string from conditions
@@ -333,33 +335,44 @@ class Translator:
         geo_filter_conditions = list(parsed.geo_conditions)
 
         # LOAD fields if needed
-        load_fields = set()
-        for agg in analyzed.aggregations:
-            if agg.field:
-                load_fields.add(agg.field)
-        for field_name in analyzed.groupby_fields:
-            load_fields.add(field_name)
-        # Load geo fields used in geo_distance() SELECT expressions
-        for geo_select in parsed.geo_distance_selects:
-            load_fields.add(geo_select.field)
-        # Load geo fields used in geo_distance() WHERE with >, >=, BETWEEN
-        for geo_cond in geo_filter_conditions:
-            load_fields.add(geo_cond.field)
-        # Load source fields for date functions in SELECT
-        for date_func in analyzed.date_functions:
-            load_fields.add(date_func.field)
-        # Load source fields for date function conditions in WHERE
-        for condition in parsed.conditions:
-            if self._is_date_function_condition(condition):
-                load_fields.add(condition.field)
-        # Load explicit SELECT fields for FT.AGGREGATE
-        for field_name in parsed.fields:
-            if field_name != "*":
+        # SELECT * in aggregate mode → LOAD * (all document attributes)
+        load_all = "*" in (parsed.fields or [])
+
+        load_fields: set[str] = set()
+        if not load_all:
+            for agg in analyzed.aggregations:
+                if agg.field:
+                    load_fields.add(agg.field)
+            for field_name in analyzed.groupby_fields:
+                load_fields.add(field_name)
+            # Load geo fields used in geo_distance() SELECT expressions
+            for geo_select in parsed.geo_distance_selects:
+                load_fields.add(geo_select.field)
+            # Load geo fields used in geo_distance() WHERE with >, >=, BETWEEN
+            for geo_cond in geo_filter_conditions:
+                load_fields.add(geo_cond.field)
+            # Load source fields for date functions in SELECT
+            for date_func in analyzed.date_functions:
+                load_fields.add(date_func.field)
+            # Load source fields for date function conditions in WHERE
+            for condition in parsed.conditions:
+                if self._is_date_function_condition(condition):
+                    load_fields.add(condition.field)
+            # Load explicit SELECT fields for FT.AGGREGATE
+            for field_name in parsed.fields:
                 # Skip computed fields (they have aliases from geo_distance)
                 if field_name not in [gs.alias for gs in parsed.geo_distance_selects]:
                     load_fields.add(field_name)
+            # Load fields referenced in exists() filters (HAVING)
+            for filter_expr in parsed.filters:
+                self._extract_exists_fields(filter_expr, load_fields)
+            # Load fields referenced in exists() computed fields (SELECT)
+            for computed in analyzed.computed_fields:
+                self._extract_exists_fields(computed.expression, load_fields)
 
-        if load_fields:
+        if load_all:
+            args.extend(["LOAD", "*"])
+        elif load_fields:
             args.append("LOAD")
             args.append(str(len(load_fields)))
             # Redis expects property names prefixed with '@' in LOAD
@@ -498,6 +511,13 @@ class Translator:
                 alias = agg.alias or agg.function.lower()
                 args.extend(["AS", alias])
 
+        # FILTER for exists() from HAVING clause (post-aggregation)
+        for filter_expr in parsed.filters:
+            prefixed = self._prefix_fields_in_expression(
+                filter_expr, analyzed.field_types
+            )
+            args.extend(["FILTER", prefixed])
+
         # SORTBY
         if parsed.orderby_fields:
             args.append("SORTBY")
@@ -593,12 +613,16 @@ class Translator:
             )
         return value * conversions[normalized_unit]
 
+    @staticmethod
+    def _extract_exists_fields(expression: str, load_fields: set[str]) -> None:
+        """Extract field names from exists() calls and add to load_fields."""
+        for match in re.finditer(r"exists\((\w+)\)", expression, re.IGNORECASE):
+            load_fields.add(match.group(1))
+
     def _prefix_fields_in_expression(
         self, expression: str, schema: dict[str, str]
     ) -> str:
         """Prefix field names with @ in an expression for Redis APPLY."""
-        import re
-
         result = expression
         for field_name in schema:
             # Match field name as a whole word, not already prefixed with @

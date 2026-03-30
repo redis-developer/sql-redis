@@ -11,7 +11,7 @@ Following a TDD approach: These tests were written to fail when the bugs were pr
 import pytest
 import redis
 
-from sql_redis.executor import Executor
+from sql_redis.executor import Executor, _substitute_params
 from sql_redis.schema import SchemaRegistry
 
 
@@ -241,8 +241,6 @@ class TestEdgeCases:
         # Characters like @ and : have special meaning in Redis Search syntax.
         # Verify parameter substitution correctly injects these values into SQL
         # (even if Redis may reject some at execution time).
-        from sql_redis.executor import _substitute_params
-
         problematic_values = [
             ("hello@world.com", "'hello@world.com'"),
             ("price: $100", "'price: $100'"),

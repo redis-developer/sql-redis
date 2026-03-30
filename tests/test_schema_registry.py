@@ -1,5 +1,7 @@
 """Tests for the SchemaRegistry class."""
 
+import time
+
 import pytest
 import redis
 
@@ -553,8 +555,6 @@ class TestSchemaRegistryWatching:
             )
 
             # Give pub/sub time to receive the message
-            import time
-
             time.sleep(0.5)
 
             # Process pending messages
@@ -586,8 +586,6 @@ class TestSchemaRegistryWatching:
         try:
             # Drop an index
             redis_client.execute_command("FT.DROPINDEX", "users", "DD")
-
-            import time
 
             time.sleep(0.5)
 
@@ -629,8 +627,6 @@ class TestSchemaRegistryWatching:
             "field",
             "TEXT",
         )
-
-        import time
 
         time.sleep(0.5)
 
