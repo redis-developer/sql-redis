@@ -164,6 +164,9 @@ class Condition:
     operator: str
     value: object
     negated: bool = False
+    fuzzy_level: int | None = None  # Levenshtein distance for FUZZY (1, 2, or 3)
+    slop: int | None = None  # Max distance between terms for proximity search
+    inorder: bool = False  # Require terms in order (used with slop)
 
 
 @dataclass
@@ -197,6 +200,17 @@ class GeoDistanceSelect:
 
 
 @dataclass
+class ScoringSpec:
+    """Specification for relevance scoring.
+
+    Triggers WITHSCORES and optional SCORER on FT.SEARCH.
+    """
+
+    alias: str = "score"  # Column alias for the score
+    scorer: str = "BM25"  # Scorer algorithm (BM25, TFIDF, DISMAX, etc.)
+
+
+@dataclass
 class ParsedQuery:
     """Result of parsing a SQL query."""
 
@@ -219,6 +233,9 @@ class ParsedQuery:
     limit: int | None = None
     offset: int | None = None
     filters: list[str] = dataclasses.field(default_factory=list)
+    scoring: ScoringSpec | None = None  # Relevance scoring config
+    verbatim: bool = False  # If True, add VERBATIM to FT.SEARCH
+    nostopwords: bool = False  # If True, add NOSTOPWORDS to FT.SEARCH
 
 
 class SQLParser:
@@ -441,6 +458,17 @@ class SQLParser:
             elif func_name_lower == "geo_distance":
                 # geo_distance(field, POINT(lon, lat), unit) in SELECT
                 self._process_geo_distance_select(expression, result, alias)
+            elif func_name_lower == "score":
+                # score() or score('BM25') — triggers WITHSCORES + SCORER
+                scorer = "BM25"
+                if expression.expressions:
+                    scorer_val = self._extract_literal_value(expression.expressions[0])
+                    if scorer_val is not None:
+                        scorer = str(scorer_val).upper()
+                result.scoring = ScoringSpec(
+                    alias=alias or "score",
+                    scorer=scorer,
+                )
             elif func_name_lower in redis_reducers:
                 # Redis-specific reducer functions
                 field_name = None
@@ -656,6 +684,9 @@ class SQLParser:
             self._add_between_condition(expression, result, negated)
         elif isinstance(expression, exp.In):
             self._add_in_condition(expression, result, negated)
+        elif isinstance(expression, exp.Like):
+            # LIKE 'pattern%' / '%pattern' / '%pattern%'
+            self._add_condition(expression, "LIKE", result, negated)
         elif isinstance(expression, exp.And):
             result.boolean_operator = "AND"
             self._process_where_clause(expression.this, result, negated)
@@ -938,17 +969,27 @@ class SQLParser:
     def _add_function_condition(
         self, expression, result: ParsedQuery, negated: bool
     ) -> None:
-        """Add a condition from a function call like fulltext(field, value)."""
+        """Add a condition from a function call like fulltext(field, value) or fuzzy(field, value, level)."""
         func_name = expression.name.upper()
-        if func_name == "FULLTEXT" and len(expression.expressions) >= 2:
-            first_arg = expression.expressions[0]
-            second_arg = expression.expressions[1]
+        args = expression.expressions
 
-            field_name = None
-            if isinstance(first_arg, exp.Column):
-                field_name = first_arg.name
+        if func_name == "FULLTEXT" and len(args) >= 2:
+            field_name = args[0].name if isinstance(args[0], exp.Column) else None
+            value = self._extract_literal_value(args[1])
 
-            value = self._extract_literal_value(second_arg)
+            # Optional 3rd arg: slop (int)
+            slop = None
+            if len(args) >= 3:
+                slop_val = self._extract_literal_value(args[2])
+                if slop_val is not None:
+                    slop = int(slop_val)
+
+            # Optional 4th arg: inorder (boolean-like: 1/0 or true/false)
+            inorder = False
+            if len(args) >= 4:
+                inorder_val = self._extract_literal_value(args[3])
+                if inorder_val is not None:
+                    inorder = str(inorder_val).lower() in ("1", "true")
 
             if field_name is not None:
                 result.conditions.append(
@@ -957,6 +998,30 @@ class SQLParser:
                         operator="FULLTEXT",
                         value=value,
                         negated=negated,
+                        slop=slop,
+                        inorder=inorder,
+                    )
+                )
+
+        elif func_name == "FUZZY" and len(args) >= 2:
+            field_name = args[0].name if isinstance(args[0], exp.Column) else None
+            value = self._extract_literal_value(args[1])
+
+            # Optional 3rd arg: fuzzy level (1, 2, or 3)
+            fuzzy_level = None
+            if len(args) >= 3:
+                level_val = self._extract_literal_value(args[2])
+                if level_val is not None:
+                    fuzzy_level = int(level_val)
+
+            if field_name is not None:
+                result.conditions.append(
+                    Condition(
+                        field=field_name,
+                        operator="FUZZY",
+                        value=value,
+                        negated=negated,
+                        fuzzy_level=fuzzy_level,
                     )
                 )
 
@@ -983,6 +1048,9 @@ class SQLParser:
                 if timestamp is not None:
                     return timestamp
             return value
+        elif isinstance(expression, exp.Boolean):
+            # Handle TRUE/FALSE keywords parsed by sqlglot
+            return expression.this
         elif isinstance(expression, exp.Neg):
             # Handle negative numbers: Neg(Literal(122.4)) -> -122.4
             inner_value = self._extract_literal_value(expression.this)

@@ -166,12 +166,25 @@ class Executor:
         rows = []
 
         if translated.command == "FT.SEARCH":
-            # FT.SEARCH format: [count, key1, [fields1], key2, [fields2], ...]
-            # Skip document keys (odd indices), take field lists (even indices after count)
-            for i in range(2, len(raw_result), 2):
-                row_data = raw_result[i]
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
+            # Check if WITHSCORES was requested — changes response format
+            with_scores = "WITHSCORES" in translated.args
+            score_alias = translated.score_alias
+
+            if with_scores:
+                # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
+                # Stride of 3: key, score, field_list
+                for i in range(1, len(raw_result) - 2, 3):
+                    score = raw_result[i + 1]
+                    row_data = raw_result[i + 2]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    row[score_alias or "__score"] = score
+                    rows.append(row)
+            else:
+                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
+                for i in range(2, len(raw_result), 2):
+                    row_data = raw_result[i]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:
@@ -258,11 +271,23 @@ class AsyncExecutor:
         rows = []
 
         if translated.command == "FT.SEARCH":
-            # FT.SEARCH format: [count, key1, [fields1], key2, [fields2], ...]
-            for i in range(2, len(raw_result), 2):
-                row_data = raw_result[i]
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
+            with_scores = "WITHSCORES" in translated.args
+            score_alias = translated.score_alias
+
+            if with_scores:
+                # WITHSCORES format: [count, key1, score1, [fields1], ...]
+                for i in range(1, len(raw_result) - 2, 3):
+                    score = raw_result[i + 1]
+                    row_data = raw_result[i + 2]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    row[score_alias or "__score"] = score
+                    rows.append(row)
+            else:
+                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
+                for i in range(2, len(raw_result), 2):
+                    row_data = raw_result[i]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:

@@ -28,6 +28,7 @@ class TranslatedQuery:
     query_string: str
     args: list[str] = field(default_factory=list)
     params: dict[str, object] = field(default_factory=dict)  # Named parameters
+    score_alias: str | None = None  # Alias for score column when WITHSCORES is used
 
     def to_command_list(self) -> list[str]:
         """Return as a list suitable for redis.execute_command()."""
@@ -230,6 +231,9 @@ class Translator:
                 operator,
                 str(condition.value),
                 is_negated,
+                fuzzy_level=condition.fuzzy_level,
+                slop=condition.slop,
+                inorder=condition.inorder,
             )
         elif field_type == "TAG":
             # Keep list value for IN clauses, convert scalar to string
@@ -334,6 +338,18 @@ class Translator:
             offset = parsed.offset or 0
             args.extend(["LIMIT", str(offset), str(parsed.limit)])
 
+        # Scoring — WITHSCORES and SCORER
+        if parsed.scoring is not None:
+            args.append("WITHSCORES")
+            if parsed.scoring.scorer:
+                args.extend(["SCORER", parsed.scoring.scorer])
+
+        # Verbatim / nostopwords flags
+        if parsed.verbatim:
+            args.append("VERBATIM")
+        if parsed.nostopwords:
+            args.append("NOSTOPWORDS")
+
         # DIALECT 2 — unconditionally appended as the last arguments
         args.extend(["DIALECT", "2"])
 
@@ -343,6 +359,7 @@ class Translator:
             query_string=query_string,
             args=args,
             params=params,
+            score_alias=(parsed.scoring.alias if parsed.scoring is not None else None),
         )
 
     def _build_geo_filter_args(self, geo_cond: GeoDistanceCondition) -> list[str]:

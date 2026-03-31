@@ -68,6 +68,10 @@ class QueryBuilder:
         operator: str,
         value: str,
         negated: bool = False,
+        *,
+        fuzzy_level: int | None = None,
+        slop: int | None = None,
+        inorder: bool = False,
     ) -> str:
         """Build query syntax for TEXT field conditions.
 
@@ -76,6 +80,9 @@ class QueryBuilder:
             operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
             value: The search term or pattern.
             negated: If True, prefix with - for negation.
+            fuzzy_level: Levenshtein distance for FUZZY (1, 2, or 3). Default 1.
+            slop: Maximum distance between terms for proximity search.
+            inorder: If True with slop, require terms in order.
 
         Returns:
             RediSearch query syntax like @field:"exact phrase" or @field:(term1 term2).
@@ -91,19 +98,24 @@ class QueryBuilder:
 
         # Handle different operators
         if operator == "LIKE":
-            # Convert SQL LIKE pattern (%) to RediSearch prefix (*)
+            # Convert SQL LIKE pattern (%) to RediSearch prefix/suffix/infix (*)
             search_value = value.replace("%", "*")
         elif operator == "FUZZY":
-            # Wrap with % for fuzzy matching
-            search_value = f"%{value}%"
+            # Wrap with % signs — count determined by fuzzy_level
+            level = fuzzy_level if fuzzy_level is not None else 1
+            if level not in (1, 2, 3):
+                raise ValueError(
+                    f"Fuzzy level must be 1, 2, or 3 (got {level}). "
+                    "RediSearch supports a maximum Levenshtein distance of 3."
+                )
+            pct = "%" * level
+            search_value = f"{pct}{value}{pct}"
         elif operator in ("=", "!="):
             # Exact phrase match — always wrap in quotes, preserve stopwords.
-            # This ensures "bank of america" stays as-is rather than
-            # being tokenized or having stopwords stripped.
             escaped = self._escape_text_value(value)
             search_value = f'"{escaped}"'
-        elif " " in value:
-            # MATCH with multi-word: tokenized search with stopword filtering
+        elif " " in value and " OR " not in value:
+            # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering
             words = value.split()
             removed_stopwords = [
                 w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
@@ -122,13 +134,25 @@ class QueryBuilder:
                     stacklevel=2,
                 )
 
-            # Use filtered words in parentheses (AND semantics), or original if all were stopwords
             terms = " ".join(filtered_words) if filtered_words else value
             search_value = f"({terms})"
+        elif " OR " in value:
+            # OR union within text field: split on ' OR ' and join with |
+            or_terms = [t.strip() for t in value.split(" OR ")]
+            search_value = f"({'|'.join(or_terms)})"
         else:
             search_value = value
 
-        return f"{prefix}@{field}:{search_value}"
+        base = f"{prefix}@{field}:{search_value}"
+
+        # Append query attributes (slop, inorder) if specified
+        if slop is not None:
+            attrs = f"$slop: {slop};"
+            if inorder:
+                attrs += " $inorder: true;"
+            base = f"{base} => {{ {attrs} }}"
+
+        return base
 
     def _escape_tag_value(self, value: str) -> str:
         """Escape special characters in TAG values."""

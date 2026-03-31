@@ -345,6 +345,171 @@ class TestQueryBuilderFullQuery:
         assert result == "*"
 
 
+class TestQueryBuilderFuzzyLevels:
+    """Tests for fuzzy matching with Levenshtein distance levels 1-3."""
+
+    def test_fuzzy_ld1_default(self):
+        """Fuzzy LD=1 (default): @field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap")
+        assert result == "@title:%laptap%"
+
+    def test_fuzzy_ld1_explicit(self):
+        """Fuzzy LD=1 (explicit): @field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=1)
+        assert result == "@title:%laptap%"
+
+    def test_fuzzy_ld2(self):
+        """Fuzzy LD=2: @field:%%term%%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=2)
+        assert result == "@title:%%laptap%%"
+
+    def test_fuzzy_ld3(self):
+        """Fuzzy LD=3: @field:%%%term%%%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=3)
+        assert result == "@title:%%%laptap%%%"
+
+    def test_fuzzy_negated(self):
+        """Fuzzy with negation: -@field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FUZZY", "laptap", negated=True, fuzzy_level=2
+        )
+        assert result == "-@title:%%laptap%%"
+
+    def test_fuzzy_invalid_level_raises(self):
+        """Fuzzy level outside 1-3 raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Fuzzy level must be 1, 2, or 3"):
+            builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=4)
+
+    def test_fuzzy_level_zero_raises(self):
+        """Fuzzy level 0 raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Fuzzy level must be 1, 2, or 3"):
+            builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=0)
+
+
+class TestQueryBuilderSuffixInfix:
+    """Tests for suffix and infix (contains) matching."""
+
+    def test_suffix_match(self):
+        """LIKE '%term' -> suffix match: @field:*term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone")
+        assert result == "@title:*phone"
+
+    def test_infix_match(self):
+        """LIKE '%term%' -> infix/contains match: @field:*term*."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone%")
+        assert result == "@title:*phone*"
+
+    def test_prefix_match_still_works(self):
+        """LIKE 'term%' -> prefix match: @field:term* (unchanged)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "lap%")
+        assert result == "@title:lap*"
+
+    def test_suffix_negated(self):
+        """Suffix match with negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone", negated=True)
+        assert result == "-@title:*phone"
+
+
+class TestQueryBuilderORInText:
+    """Tests for OR/union within text field searches."""
+
+    def test_fulltext_or_terms(self):
+        """FULLTEXT with OR: @field:(term1|term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop OR tablet")
+        assert result == "@title:(laptop|tablet)"
+
+    def test_fulltext_or_multiple_terms(self):
+        """FULLTEXT with multiple OR: @field:(t1|t2|t3)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR tablet OR phone"
+        )
+        assert result == "@title:(laptop|tablet|phone)"
+
+    def test_fulltext_or_negated(self):
+        """FULLTEXT OR with negation: -@field:(term1|term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR tablet", negated=True
+        )
+        assert result == "-@title:(laptop|tablet)"
+
+    def test_fulltext_and_still_works(self):
+        """FULLTEXT without OR: @field:(term1 term2) (AND semantics, unchanged)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "gaming laptop")
+        assert result == "@title:(gaming laptop)"
+
+
+class TestQueryBuilderProximity:
+    """Tests for proximity search (slop and inorder)."""
+
+    def test_fulltext_with_slop(self):
+        """FULLTEXT with slop: @field:(term1 term2) => {$slop: N}."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", slop=2
+        )
+        assert result == "@title:(gaming laptop) => { $slop: 2; }"
+
+    def test_fulltext_with_slop_and_inorder(self):
+        """FULLTEXT with slop and inorder."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", slop=2, inorder=True
+        )
+        assert result == "@title:(gaming laptop) => { $slop: 2; $inorder: true; }"
+
+    def test_exact_phrase_with_slop(self):
+        """Exact phrase with slop appended."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", "gaming laptop", slop=1)
+        assert result == '@title:"gaming laptop" => { $slop: 1; }'
+
+    def test_slop_negated(self):
+        """Proximity with negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", negated=True, slop=3
+        )
+        assert result == "-@title:(gaming laptop) => { $slop: 3; }"
+
+
+class TestQueryBuilderVerbatim:
+    """Tests for verbatim and nostopwords flags."""
+
+    def test_fulltext_with_verbatim(self):
+        """FULLTEXT search term is not affected by verbatim (query-level flag)."""
+        # verbatim is a query-level flag, not part of the condition string
+        # This test just ensures normal behavior is preserved
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "running")
+        assert result == "@title:running"
+
+
+class TestQueryBuilderOptionalTerms:
+    """Tests for optional term (~) syntax."""
+
+    def test_fulltext_optional_term(self):
+        """FULLTEXT with optional terms using ~ prefix in value."""
+        builder = QueryBuilder()
+        # User writes: fulltext(field, 'required ~optional')
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop ~gaming")
+        assert result == "@title:(laptop ~gaming)"
+
+
 class TestQueryBuilderMissingCondition:
     """Tests for ismissing() query syntax."""
 

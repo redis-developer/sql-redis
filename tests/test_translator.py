@@ -616,3 +616,147 @@ class TestTranslatorExists:
         assert "LOAD" in result.args
         load_idx = result.args.index("LOAD")
         assert result.args[load_idx + 1] == "*"
+
+
+class TestTranslatorFuzzyLevels:
+    """Tests for FUZZY with Levenshtein distance levels.
+
+    Inspired by PostgreSQL's pg_trgm similarity threshold levels,
+    maps to RediSearch's %, %%, %%% fuzzy syntax.
+    """
+
+    def test_fuzzy_ld1_default(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term') with no level → LD=1 (%term%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap')"
+        )
+        assert result.command == "FT.SEARCH"
+        assert "@title:%laptap%" in result.query_string
+
+    def test_fuzzy_ld2(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term', 2) → LD=2 (%%term%%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap', 2)"
+        )
+        assert "@title:%%laptap%%" in result.query_string
+
+    def test_fuzzy_ld3(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term', 3) → LD=3 (%%%term%%%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap', 3)"
+        )
+        assert "@title:%%%laptap%%%" in result.query_string
+
+
+class TestTranslatorSuffixInfix:
+    """Tests for suffix and infix (contains) pattern matching.
+
+    PostgreSQL analogy: LIKE '%term' and LIKE '%term%'.
+    RediSearch uses *term and *term* respectively.
+    """
+
+    def test_suffix_match(self, translator: Translator, basic_index: str):
+        """LIKE '%phone' → suffix match @field:*phone."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE '%phone'"
+        )
+        assert "@title:*phone" in result.query_string
+
+    def test_infix_match(self, translator: Translator, basic_index: str):
+        """LIKE '%phone%' → infix/contains match @field:*phone*."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE '%phone%'"
+        )
+        assert "@title:*phone*" in result.query_string
+
+    def test_prefix_still_works(self, translator: Translator, basic_index: str):
+        """LIKE 'lap%' → prefix match @field:lap* (unchanged)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE 'lap%'"
+        )
+        assert "@title:lap*" in result.query_string
+
+
+class TestTranslatorORInText:
+    """Tests for OR/union within text field searches.
+
+    Inspired by PostgreSQL's to_tsquery('fat | rat') and
+    websearch_to_tsquery('fat OR rat') — natural OR syntax
+    maps to RediSearch's @field:(term1|term2).
+    """
+
+    def test_fulltext_or(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'laptop OR tablet') → @field:(laptop|tablet)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'laptop OR tablet')"
+        )
+        assert "@title:(laptop|tablet)" in result.query_string
+
+    def test_fulltext_multiple_or(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'a OR b OR c') → @field:(a|b|c)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'laptop OR tablet OR phone')"
+        )
+        assert "@title:(laptop|tablet|phone)" in result.query_string
+
+
+class TestTranslatorProximity:
+    """Tests for proximity search (slop + inorder).
+
+    Inspired by PostgreSQL's phraseto_tsquery / <N> FOLLOWED BY operator.
+    Maps to RediSearch query attributes: => { $slop: N; $inorder: true; }.
+    """
+
+    def test_fulltext_with_slop(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'gaming laptop', 2) → slop=2 query attribute."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'gaming laptop', 2)"
+        )
+        assert "$slop: 2;" in result.query_string
+
+    def test_fulltext_with_slop_and_inorder(
+        self, translator: Translator, basic_index: str
+    ):
+        """fulltext(field, 'gaming laptop', 2, true) → slop=2 + inorder."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'gaming laptop', 2, true)"
+        )
+        assert "$slop: 2;" in result.query_string
+        assert "$inorder: true;" in result.query_string
+
+
+class TestTranslatorScoring:
+    """Tests for relevance scoring (WITHSCORES + SCORER).
+
+    Inspired by PostgreSQL's ts_rank(vector, query) AS rank in SELECT.
+    Maps to RediSearch's WITHSCORES and SCORER flags on FT.SEARCH.
+
+    SQL: SELECT name, score() AS relevance FROM idx WHERE fulltext(...)
+    Redis: FT.SEARCH idx "@field:(term)" WITHSCORES SCORER BM25
+    """
+
+    def test_score_default_bm25(self, translator: Translator, basic_index: str):
+        """score() in SELECT → WITHSCORES + SCORER BM25."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" in result.args
+        assert "SCORER" in result.args
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "BM25"
+
+    def test_score_custom_scorer(self, translator: Translator, basic_index: str):
+        """score('TFIDF') in SELECT → WITHSCORES + SCORER TFIDF."""
+        result = translator.translate(
+            f"SELECT title, score('TFIDF') AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" in result.args
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "TFIDF"
+
+    def test_no_score_no_withscores(self, translator: Translator, basic_index: str):
+        """Without score() → no WITHSCORES flag."""
+        result = translator.translate(
+            f"SELECT title FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" not in result.args
