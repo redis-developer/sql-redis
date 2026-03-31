@@ -71,7 +71,7 @@ class TestQueryBuilderTextFields:
         """TEXT field with NOT: -@field:term."""
         builder = QueryBuilder()
         result = builder.build_text_condition(
-            "title", "MATCH", "refurbished", negated=True
+            "title", "FULLTEXT", "refurbished", negated=True
         )
 
         assert result == "-@title:refurbished"
@@ -83,11 +83,18 @@ class TestQueryBuilderTextFields:
 
         assert result == "@title:%laptap%"
 
+    def test_text_fulltext_special_chars_escaped(self):
+        """FULLTEXT term with RediSearch operator chars is escaped to avoid injection."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("description", "FULLTEXT", "anti-virus")
+
+        assert result == r"@description:anti\-virus"
+
     def test_text_multi_field(self):
         """TEXT multi-field search: (@field1|field2:term)."""
         builder = QueryBuilder()
         result = builder.build_text_condition(
-            ["title", "description"], "MATCH", "wireless"
+            ["title", "description"], "FULLTEXT", "wireless"
         )
 
         assert result == "(@title|description:wireless)"

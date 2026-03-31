@@ -51,6 +51,12 @@ class QueryBuilder:
     # Characters that need escaping in TAG values
     TAG_SPECIAL_CHARS = r".,<>{}[]\"':;!@#$%^&*()-+=~"
 
+    # Characters that have special meaning in RediSearch free-text queries
+    # (outside of double-quoted phrases) and must be escaped with a backslash.
+    # Only characters likely to appear accidentally in user data are included;
+    # intentional RediSearch features (~, *, %, ^) are intentionally excluded.
+    TEXT_QUERY_SPECIAL_CHARS = frozenset({"\\", "-", "@", "|", "(", ")"})
+
     @staticmethod
     def _escape_text_value(value: str) -> str:
         """Escape characters that are special inside RediSearch double-quoted phrases.
@@ -61,6 +67,23 @@ class QueryBuilder:
         # Escape backslashes first (so we don't double-escape the quote escapes),
         # then escape double quotes.
         return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    @classmethod
+    def _escape_fulltext_term(cls, term: str) -> str:
+        """Escape characters that have special meaning in RediSearch free-text queries.
+
+        Applied to individual terms used outside of double-quoted phrases (e.g.,
+        in parenthesized FULLTEXT expressions) so that user input containing
+        RediSearch operator characters like |, -, (, ), @ does not alter the
+        query semantics or produce syntax errors.
+        """
+        result = []
+        for char in term:
+            if char in cls.TEXT_QUERY_SPECIAL_CHARS:
+                result.append(f"\\{char}")
+            else:
+                result.append(char)
+        return "".join(result)
 
     def build_text_condition(
         self,
@@ -77,7 +100,11 @@ class QueryBuilder:
 
         Args:
             field: Field name or list of field names for multi-field search.
-            operator: One of =, !=, FULLTEXT (or MATCH alias), LIKE, FUZZY.
+            operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
+                - = / !=: exact phrase match, value wrapped in double quotes.
+                - FULLTEXT: tokenized keyword search with stopword filtering.
+                - LIKE: prefix/suffix/infix pattern (SQL % → RediSearch *).
+                - FUZZY: Levenshtein fuzzy match.
             value: The search term or pattern.
             negated: If True, prefix with - for negation.
             fuzzy_level: Levenshtein distance for FUZZY (1, 2, or 3). Default 1.
@@ -118,7 +145,9 @@ class QueryBuilder:
             escaped = self._escape_text_value(value)
             search_value = f'"{escaped}"'
         elif " " in value and " OR " not in value:
-            # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering
+            # FULLTEXT with multi-word: tokenized search with stopword filtering.
+            # Each term is escaped to prevent RediSearch operator characters in
+            # user input from changing query semantics.
             words = value.split()
             removed_stopwords = [
                 w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
@@ -137,14 +166,24 @@ class QueryBuilder:
                     stacklevel=2,
                 )
 
-            terms = " ".join(filtered_words) if filtered_words else value
-            search_value = f"({terms})"
+            if filtered_words:
+                escaped_terms = " ".join(
+                    self._escape_fulltext_term(w) for w in filtered_words
+                )
+            else:
+                # All words were stopwords; pass them through (escaped) so the
+                # query doesn't become empty. RediSearch will still skip them at
+                # query time, but this avoids a syntax error from an empty clause.
+                escaped_terms = " ".join(self._escape_fulltext_term(w) for w in words)
+            search_value = f"({escaped_terms})"
         elif " OR " in value:
             # OR union within text field: split on ' OR ' and join with |
-            or_terms = [t.strip() for t in value.split(" OR ")]
+            or_terms = [
+                self._escape_fulltext_term(t.strip()) for t in value.split(" OR ")
+            ]
             search_value = f"({'|'.join(or_terms)})"
         else:
-            search_value = value
+            search_value = self._escape_fulltext_term(value)
 
         base = f"{prefix}@{field}:{search_value}"
 
