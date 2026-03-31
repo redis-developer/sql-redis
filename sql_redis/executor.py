@@ -177,7 +177,11 @@ class Executor:
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    row[score_alias or "__score"] = score
+                    alias = score_alias or "__score"
+                    # Guard: if alias collides with a document field, prefix it
+                    if alias in row:
+                        alias = f"__score_{alias}"
+                    row[alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
@@ -280,7 +284,10 @@ class AsyncExecutor:
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    row[score_alias or "__score"] = score
+                    alias = score_alias or "__score"
+                    if alias in row:
+                        alias = f"__score_{alias}"
+                    row[alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]

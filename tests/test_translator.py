@@ -760,3 +760,27 @@ class TestTranslatorScoring:
             f"SELECT title FROM {basic_index} WHERE fulltext(title, 'laptop')"
         )
         assert "WITHSCORES" not in result.args
+
+    def test_score_only_select_emits_return_0(
+        self, translator: Translator, basic_index: str
+    ):
+        """SELECT score() AS relevance (no other fields) → RETURN 0 to prevent payload leak."""
+        result = translator.translate(
+            f"SELECT score() AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "RETURN" in result.args
+        ret_idx = result.args.index("RETURN")
+        assert result.args[ret_idx + 1] == "0"
+        assert "WITHSCORES" in result.args
+
+    def test_score_with_aggregate_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """score() combined with GROUP BY (forces FT.AGGREGATE) raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="score.*not supported.*FT.AGGREGATE"):
+            translator.translate(
+                f"SELECT COUNT(*), score() AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop') GROUP BY category"
+            )

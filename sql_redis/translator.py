@@ -162,6 +162,13 @@ class Translator:
         query_string = self._build_query_string(analyzed)
 
         if use_aggregate:
+            if parsed.scoring is not None:
+                raise ValueError(
+                    "score() is not supported with FT.AGGREGATE queries. "
+                    "WITHSCORES / SCORER are FT.SEARCH-only features. "
+                    "Remove score() or avoid GROUP BY / aggregation functions "
+                    "in the same query."
+                )
             return self._build_aggregate(analyzed, query_string)
         else:
             return self._build_search(analyzed, query_string)
@@ -323,7 +330,16 @@ class Translator:
             if analyzed.vector_search.alias not in return_fields:
                 return_fields.append(analyzed.vector_search.alias)
 
-        if return_fields and return_fields != ["*"]:
+        # When score() is the only SELECT expression, parsed.fields is empty.
+        # We still need a RETURN clause to avoid leaking full document payloads.
+        # Score itself is delivered via WITHSCORES (not RETURN), but we must
+        # emit RETURN 0 so Redis returns no document attributes beyond the score.
+        score_only_select = parsed.scoring is not None and not return_fields
+
+        if score_only_select:
+            # RETURN 0 — suppress all document fields, score comes via WITHSCORES
+            args.extend(["RETURN", "0"])
+        elif return_fields and return_fields != ["*"]:
             args.append("RETURN")
             args.append(str(len(return_fields)))
             args.extend(return_fields)

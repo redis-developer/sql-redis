@@ -531,3 +531,51 @@ class TestQueryBuilderMissingCondition:
         builder = QueryBuilder()
         result = builder.build_missing_condition("email", is_missing=False)
         assert result == "-ismissing(@email)"
+
+
+class TestQueryBuilderEscaping:
+    """Tests for escaping special characters in text search values."""
+
+    def test_escape_fulltext_term_special_chars(self):
+        """_escape_fulltext_term escapes RediSearch operator characters."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term("hello|world")
+        assert result == "hello\\|world"
+
+    def test_escape_fulltext_term_double_quote(self):
+        """_escape_fulltext_term escapes double quotes."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term('say "hello"')
+        assert result == 'say \\"hello\\"'
+
+    def test_escape_fulltext_term_at_sign(self):
+        """_escape_fulltext_term escapes @ to prevent field injection."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term("user@email")
+        assert result == "user\\@email"
+
+    def test_like_escapes_special_chars(self):
+        """LIKE pattern escapes special chars in the non-wildcard portion."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%hello|world%")
+        assert result == "@title:*hello\\|world*"
+
+    def test_fuzzy_escapes_special_chars(self):
+        """FUZZY escapes special chars in the term before wrapping with %."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "hello@world")
+        assert result == "@title:%hello\\@world%"
+
+    def test_fuzzy_escapes_double_quote(self):
+        """FUZZY escapes double quotes in term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", 'say"hi')
+        assert result == '@title:%say\\"hi%'
+
+    def test_multi_field_non_exact_escapes(self):
+        """Multi-field search with non-exact operator escapes special chars."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "hello|world"
+        )
+        assert result == "(@title|description:hello\\|world)"
