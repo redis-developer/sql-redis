@@ -77,7 +77,7 @@ class QueryBuilder:
 
         Args:
             field: Field name or list of field names for multi-field search.
-            operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
+            operator: One of =, !=, FULLTEXT (or MATCH alias), LIKE, FUZZY.
             value: The search term or pattern.
             negated: If True, prefix with - for negation.
             fuzzy_level: Levenshtein distance for FUZZY (1, 2, or 3). Default 1.
@@ -91,10 +91,13 @@ class QueryBuilder:
         # consistent with how build_tag_condition handles != via operator.
         prefix = "-" if negated or operator == "!=" else ""
 
-        # Handle multi-field search
+        # Handle multi-field search — apply same escaping/operator semantics
         if isinstance(field, list):
             field_str = "|".join(field)
-            return f"(@{field_str}:{value})"
+            if operator in ("=", "!="):
+                escaped = self._escape_text_value(value)
+                return f'{prefix}(@{field_str}:"{escaped}")'
+            return f"{prefix}(@{field_str}:{value})"
 
         # Handle different operators
         if operator == "LIKE":
