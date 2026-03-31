@@ -51,6 +51,17 @@ class QueryBuilder:
     # Characters that need escaping in TAG values
     TAG_SPECIAL_CHARS = r".,<>{}[]\"':;!@#$%^&*()-+=~"
 
+    @staticmethod
+    def _escape_text_value(value: str) -> str:
+        """Escape characters that are special inside RediSearch double-quoted phrases.
+
+        Backslashes and double quotes must be escaped so they don't break
+        the query syntax or alter its meaning.
+        """
+        # Escape backslashes first (so we don't double-escape the quote escapes),
+        # then escape double quotes.
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
     def build_text_condition(
         self,
         field: str | list[str],
@@ -62,14 +73,16 @@ class QueryBuilder:
 
         Args:
             field: Field name or list of field names for multi-field search.
-            operator: One of =, MATCH, LIKE, FUZZY.
+            operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
             value: The search term or pattern.
             negated: If True, prefix with - for negation.
 
         Returns:
-            RediSearch query syntax like @field:term or @field:"phrase".
+            RediSearch query syntax like @field:"exact phrase" or @field:(term1 term2).
         """
-        prefix = "-" if negated else ""
+        # Derive negation from both the flag and the operator itself,
+        # consistent with how build_tag_condition handles != via operator.
+        prefix = "-" if negated or operator == "!=" else ""
 
         # Handle multi-field search
         if isinstance(field, list):
@@ -83,8 +96,14 @@ class QueryBuilder:
         elif operator == "FUZZY":
             # Wrap with % for fuzzy matching
             search_value = f"%{value}%"
+        elif operator in ("=", "!="):
+            # Exact phrase match — always wrap in quotes, preserve stopwords.
+            # This ensures "bank of america" stays as-is rather than
+            # being tokenized or having stopwords stripped.
+            escaped = self._escape_text_value(value)
+            search_value = f'"{escaped}"'
         elif " " in value:
-            # Phrase search - filter stopwords and wrap in quotes
+            # MATCH with multi-word: tokenized search with stopword filtering
             words = value.split()
             removed_stopwords = [
                 w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
@@ -95,16 +114,17 @@ class QueryBuilder:
 
             if removed_stopwords:
                 warnings.warn(
-                    f"Stopwords {removed_stopwords} were removed from phrase search '{value}'. "
+                    f"Stopwords {removed_stopwords} were removed from text search '{value}'. "
                     "By default, Redis does not index stopwords. "
-                    "To include stopwords in your index, create it with STOPWORDS 0.",
+                    "To include stopwords in your index, create it with STOPWORDS 0. "
+                    "Use = operator for exact phrase matching that preserves stopwords.",
                     UserWarning,
                     stacklevel=2,
                 )
 
-            # Use filtered phrase, or original if all words were stopwords
-            phrase = " ".join(filtered_words) if filtered_words else value
-            search_value = f'"{phrase}"'
+            # Use filtered words in parentheses (AND semantics), or original if all were stopwords
+            terms = " ".join(filtered_words) if filtered_words else value
+            search_value = f"({terms})"
         else:
             search_value = value
 

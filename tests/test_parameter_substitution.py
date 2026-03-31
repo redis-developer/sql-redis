@@ -211,9 +211,13 @@ class TestEdgeCases:
         Note: Redis Search doesn't handle empty string literals well in TEXT fields.
         This is a Redis limitation, not a parameter substitution bug.
         """
-        # Empty strings cause Redis syntax errors in TEXT field queries
+        # Empty strings cause Redis errors in TEXT field queries
         # This is expected behavior - Redis Search requires non-empty search terms
-        with pytest.raises(redis.exceptions.ResponseError, match="Syntax error"):
+        # With exact phrase syntax (@field:""), Redis may return "Syntax error"
+        # or "INDEXEMPTY" guidance depending on the Redis version
+        with pytest.raises(
+            redis.exceptions.ResponseError, match="Syntax error|INDEXEMPTY"
+        ):
             param_executor.execute(
                 f"SELECT * FROM {param_test_index} WHERE name = :name",
                 params={"name": ""},

@@ -136,7 +136,7 @@ class TestTranslatorBasicSearch:
         )
 
         assert result.command == "FT.SEARCH"
-        assert result.query_string == "@title:hello"
+        assert result.query_string == '@title:"hello"'
 
     def test_select_with_numeric_filter(self, translator: Translator, basic_index: str):
         """SELECT with NUMERIC field condition."""
@@ -202,7 +202,7 @@ class TestTranslatorBooleanConditions:
             f"SELECT * FROM {basic_index} WHERE title = 'hello' AND price > 50"
         )
 
-        assert "@title:hello" in result.query_string
+        assert '@title:"hello"' in result.query_string
         assert "@price:[(50 +inf]" in result.query_string
 
     def test_or_conditions(self, translator: Translator, basic_index: str):

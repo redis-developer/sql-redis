@@ -8,26 +8,57 @@ from sql_redis.query_builder import QueryBuilder
 class TestQueryBuilderTextFields:
     """Tests for building TEXT field query syntax."""
 
-    def test_text_single_term(self):
-        """TEXT field with single term: @field:term."""
+    def test_text_single_term_exact(self):
+        """TEXT field with = wraps in quotes for exact phrase: @field:"term"."""
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "=", "laptop")
 
-        assert result == "@title:laptop"
+        assert result == '@title:"laptop"'
 
     def test_text_exact_phrase(self):
-        """TEXT field with phrase: @field:"exact phrase"."""
+        """TEXT field with = preserves multi-word phrase: @field:"exact phrase"."""
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "=", "gaming laptop")
 
         assert result == '@title:"gaming laptop"'
 
-    def test_text_match_term(self):
-        """TEXT field with MATCH: @field:term."""
+    def test_text_exact_phrase_preserves_stopwords(self):
+        """TEXT field with = preserves stopwords in exact phrase matching."""
         builder = QueryBuilder()
-        result = builder.build_text_condition("title", "MATCH", "laptop")
+        result = builder.build_text_condition("name", "=", "bank of america")
+
+        # Stopwords like "of" must NOT be stripped for exact phrase matching
+        assert result == '@name:"bank of america"'
+
+    def test_text_exact_phrase_escapes_quotes(self):
+        """TEXT field with = escapes double quotes inside the value."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", 'say "hello"')
+
+        assert result == r'@title:"say \"hello\""'
+
+    def test_text_exact_phrase_escapes_backslashes(self):
+        """TEXT field with = escapes backslashes inside the value."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("path", "=", r"c:\users\docs")
+
+        assert result == r'@path:"c:\\users\\docs"'
+
+    def test_text_fulltext_term(self):
+        """TEXT field with FULLTEXT (tokenized search): @field:term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop")
 
         assert result == "@title:laptop"
+
+    def test_text_fulltext_multi_word(self):
+        """TEXT field with FULLTEXT and multi-word: @field:(term1 term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "description", "FULLTEXT", "gaming laptop"
+        )
+
+        assert result == "@description:(gaming laptop)"
 
     def test_text_prefix_search(self):
         """TEXT field with prefix: @field:prefix*."""
