@@ -226,11 +226,14 @@ class Translator:
                 condition.field, is_missing=(condition.operator == "IS_NULL")
             )
 
-        # Determine if this is a negation (either explicit or via != operator)
+        # Resolve negation using XOR so that double negation cancels out.
+        # e.g. NOT (field != 'x') → negated=True, op='!=' → is_negated=False.
         operator = condition.operator
-        is_negated = condition.negated or operator == "!="
-        if condition.negated and operator == "=":
-            operator = "!="
+        is_negated = condition.negated ^ (operator == "!=")
+        # Normalize = / != to match the resolved negation state so every
+        # downstream builder sees a consistent (operator, negated) pair.
+        if operator in ("=", "!="):
+            operator = "!=" if is_negated else "="
 
         if field_type == "TEXT":
             return self._query_builder.build_text_condition(
@@ -359,12 +362,6 @@ class Translator:
             args.append("WITHSCORES")
             if parsed.scoring.scorer:
                 args.extend(["SCORER", parsed.scoring.scorer])
-
-        # Verbatim / nostopwords flags
-        if parsed.verbatim:
-            args.append("VERBATIM")
-        if parsed.nostopwords:
-            args.append("NOSTOPWORDS")
 
         # DIALECT 2 — unconditionally appended as the last arguments
         args.extend(["DIALECT", "2"])

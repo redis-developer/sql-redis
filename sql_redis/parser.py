@@ -234,9 +234,6 @@ class ParsedQuery:
     offset: int | None = None
     filters: list[str] = dataclasses.field(default_factory=list)
     scoring: ScoringSpec | None = None  # Relevance scoring config
-    # API-only flags — not set by SQL parsing, available for programmatic use
-    verbatim: bool = False  # If True, add VERBATIM to FT.SEARCH
-    nostopwords: bool = False  # If True, add NOSTOPWORDS to FT.SEARCH
 
 
 class SQLParser:

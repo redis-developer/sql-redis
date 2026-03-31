@@ -494,18 +494,6 @@ class TestQueryBuilderProximity:
         assert result == "-@title:(gaming laptop) => { $slop: 3; }"
 
 
-class TestQueryBuilderVerbatim:
-    """Tests for verbatim and nostopwords flags."""
-
-    def test_fulltext_with_verbatim(self):
-        """FULLTEXT search term is not affected by verbatim (query-level flag)."""
-        # verbatim is a query-level flag, not part of the condition string
-        # This test just ensures normal behavior is preserved
-        builder = QueryBuilder()
-        result = builder.build_text_condition("title", "FULLTEXT", "running")
-        assert result == "@title:running"
-
-
 class TestQueryBuilderOptionalTerms:
     """Tests for optional term (~) syntax."""
 

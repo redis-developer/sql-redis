@@ -416,6 +416,14 @@ class TestTranslatorNegation:
 
         assert "-@title" in result.query_string
 
+    def test_double_negation_cancels(self, translator: Translator, basic_index: str):
+        """NOT (field != x) double negation resolves to positive match."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE NOT title != 'good'"
+        )
+
+        assert result.query_string == '@title:"good"'
+
 
 class TestTranslatorOutput:
     """Tests for output format methods."""

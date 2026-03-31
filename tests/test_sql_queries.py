@@ -36,15 +36,13 @@ class TestTextSearchQuery:
     ):
         """SQL equivalent of FT.AGGREGATE with text match and numeric filter."""
         # For TEXT fields, = becomes a text search in Redis
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT title, price
             FROM {products_data}
             WHERE title = 'laptop' AND price < 1000
             ORDER BY price ASC
             LIMIT 10
-            """
-        )
+            """)
         assert len(result.rows) >= 1, "Should return at least one laptop under $1000"
         # Verify results are sorted by price ascending
         prices = [float(row["price"]) for row in result.rows]
@@ -94,15 +92,13 @@ class TestGroupByWithCount:
 
     def test_count_with_filter(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with GROUPBY and COUNT."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT category, COUNT(*) AS count
             FROM {products_data}
             WHERE price >= 50
             GROUP BY category
             ORDER BY count DESC
-            """
-        )
+            """)
         assert len(result.rows) >= 1, "Should return grouped results"
         for row in result.rows:
             assert "category" in row
@@ -114,15 +110,13 @@ class TestMultipleAggregations:
 
     def test_count_sum_avg_aggregations(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with multiple REDUCE operations."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT category, COUNT(*) AS product_count, SUM(price) AS total_price, AVG(rating) AS avg_rating
             FROM {products_data}
             GROUP BY category
             ORDER BY total_price DESC
             LIMIT 10
-            """
-        )
+            """)
         assert len(result.rows) >= 1, "Should return aggregated results"
         row = result.rows[0]
         assert "product_count" in row
@@ -135,13 +129,11 @@ class TestGlobalAggregation:
 
     def test_aggregation_without_group_by(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with GROUPBY 0 for global aggregation."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT COUNT(*) AS total_count, AVG(price) AS avg_price
             FROM {products_data}
             WHERE price > 100
-            """
-        )
+            """)
         assert len(result.rows) == 1, "Should return single aggregation row"
         row = result.rows[0]
         assert "total_count" in row
@@ -153,14 +145,12 @@ class TestApplyWithComputedFields:
 
     def test_computed_field_expression(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with APPLY for computed fields."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT price, price * 0.9 AS discounted_price
             FROM {products_data}
             WHERE price > 100
             ORDER BY discounted_price DESC
-            """
-        )
+            """)
         assert len(result.rows) >= 1, "Should return results with computed field"
         for row in result.rows:
             price = float(row["price"])
@@ -169,14 +159,12 @@ class TestApplyWithComputedFields:
 
     def test_computed_field_addition(self, executor: Executor, products_data: str):
         """Computed field with addition."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT price, price + 10 AS price_with_shipping
             FROM {products_data}
             WHERE price < 200
             LIMIT 5
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             price = float(row["price"])
@@ -185,14 +173,12 @@ class TestApplyWithComputedFields:
 
     def test_computed_field_division(self, executor: Executor, products_data: str):
         """Computed field with division for percentage."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT price, price / 100 AS price_in_hundreds
             FROM {products_data}
             WHERE price >= 100
             LIMIT 5
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             price = float(row["price"])
@@ -201,14 +187,12 @@ class TestApplyWithComputedFields:
 
     def test_multiple_computed_fields(self, executor: Executor, products_data: str):
         """Multiple computed fields in one query."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT price, price * 0.9 AS sale_price, price * 1.1 AS markup_price
             FROM {products_data}
             WHERE price > 50
             LIMIT 5
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             price = float(row["price"])
@@ -223,13 +207,11 @@ class TestRangeQueryWithBetween:
 
     def test_between_and_greater_than(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with numeric range filters."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT title, price
             FROM {products_data}
             WHERE price BETWEEN 100 AND 500 AND stock >= 1
-            """
-        )
+            """)
         assert len(result.rows) >= 1, "Should return products in price range"
         for row in result.rows:
             price = float(row["price"])
@@ -241,52 +223,44 @@ class TestTagFieldMultiValueSearch:
 
     def test_in_clause_with_or(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with TAG field OR conditions."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT name
             FROM {products_data}
             WHERE tags IN ('sale', 'featured') OR category = 'electronics'
-            """
-        )
+            """)
         assert (
             len(result.rows) >= 1
         ), "Should return products matching tag OR conditions"
 
     def test_tag_in_clause_only(self, executor: Executor, products_data: str):
         """IN clause on TAG field without OR."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT name, category
             FROM {products_data}
             WHERE category IN ('electronics', 'books')
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             assert row["category"] in ["electronics", "books"]
 
     def test_tag_equality(self, executor: Executor, products_data: str):
         """Simple TAG equality filter."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT name, category
             FROM {products_data}
             WHERE category = 'electronics'
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             assert row["category"] == "electronics"
 
     def test_or_with_same_field_type(self, executor: Executor, products_data: str):
         """OR condition across same field type (TAG)."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT name, category
             FROM {products_data}
             WHERE category = 'electronics' OR category = 'books'
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             assert row["category"] in ["electronics", "books"]
@@ -295,13 +269,11 @@ class TestTagFieldMultiValueSearch:
         self, executor: Executor, products_data: str
     ):
         """OR condition across different field types (TAG and NUMERIC)."""
-        result = executor.execute(
-            f"""
+        result = executor.execute(f"""
             SELECT name, category, price
             FROM {products_data}
             WHERE category = 'books' OR price > 800
-            """
-        )
+            """)
         assert len(result.rows) >= 1
         for row in result.rows:
             is_book = row["category"] == "books"
@@ -315,25 +287,21 @@ class TestPaginationWithOffset:
     def test_limit_with_offset(self, executor: Executor, products_data: str):
         """SQL equivalent of FT.AGGREGATE with LIMIT offset count."""
         # First get all books sorted
-        all_books = executor.execute(
-            f"""
+        all_books = executor.execute(f"""
             SELECT title, price
             FROM {products_data}
             WHERE category = 'books'
             ORDER BY price DESC
-            """
-        )
+            """)
 
         # Then get with offset (page 2, page size 1)
-        paginated = executor.execute(
-            f"""
+        paginated = executor.execute(f"""
             SELECT title, price
             FROM {products_data}
             WHERE category = 'books'
             ORDER BY price DESC
             LIMIT 1 OFFSET 1
-            """
-        )
+            """)
 
         assert len(paginated.rows) >= 1, "Should return paginated results"
         # If we have enough results, verify offset works
@@ -449,11 +417,9 @@ class TestBM25Scoring:
 
     def test_score_returns_relevance(self, executor: Executor, products_data: str):
         """score() in SELECT should return relevance scores."""
-        result = executor.execute(
-            f"""SELECT title, score() AS relevance
+        result = executor.execute(f"""SELECT title, score() AS relevance
             FROM {products_data}
-            WHERE fulltext(title, 'laptop')"""
-        )
+            WHERE fulltext(title, 'laptop')""")
         assert len(result.rows) >= 1, "Should return results with scores"
         for row in result.rows:
             assert "relevance" in row, f"Row should have 'relevance' key: {row}"
@@ -462,11 +428,9 @@ class TestBM25Scoring:
 
     def test_score_custom_scorer(self, executor: Executor, products_data: str):
         """score('TFIDF') should use TFIDF scorer."""
-        result = executor.execute(
-            f"""SELECT title, score('TFIDF') AS relevance
+        result = executor.execute(f"""SELECT title, score('TFIDF') AS relevance
             FROM {products_data}
-            WHERE fulltext(title, 'laptop')"""
-        )
+            WHERE fulltext(title, 'laptop')""")
         assert len(result.rows) >= 1, "Should return results with TFIDF scores"
         for row in result.rows:
             assert "relevance" in row
