@@ -103,7 +103,20 @@ class QueryResult:
     count: int
 
 
-class Executor:
+class _ScoreParseMixin:
+    """Shared helper for detecting RETURN 0 (NOCONTENT) in translated args."""
+
+    @staticmethod
+    def _has_return_0(args: list[str]) -> bool:
+        """Return True when the args contain 'RETURN 0' (no document fields)."""
+        try:
+            idx = args.index("RETURN")
+            return args[idx + 1] == "0"
+        except (ValueError, IndexError):
+            return False
+
+
+class Executor(_ScoreParseMixin):
     """Executes SQL queries against Redis."""
 
     def __init__(self, client: redis.Redis, schema_registry: SchemaRegistry) -> None:
@@ -169,8 +182,19 @@ class Executor:
             # Check if WITHSCORES was requested — changes response format
             with_scores = "WITHSCORES" in translated.args
             score_alias = translated.score_alias
+            # RETURN 0 suppresses document fields (like NOCONTENT);
+            # with WITHSCORES the reply is [count, id, score, id, score, ...]
+            no_content = self._has_return_0(translated.args)
 
-            if with_scores:
+            if with_scores and no_content:
+                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                # Stride of 2: key, score (no field array)
+                for i in range(1, len(raw_result) - 1, 2):
+                    score = raw_result[i + 1]
+                    alias = score_alias or "__score"
+                    row = {alias: score}
+                    rows.append(row)
+            elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
                 # Stride of 3: key, score, field_list
                 for i in range(1, len(raw_result) - 2, 3):
@@ -198,7 +222,7 @@ class Executor:
         return QueryResult(rows=rows, count=count)
 
 
-class AsyncExecutor:
+class AsyncExecutor(_ScoreParseMixin):
     """Async version of Executor for use with redis.asyncio clients."""
 
     def __init__(
@@ -277,8 +301,16 @@ class AsyncExecutor:
         if translated.command == "FT.SEARCH":
             with_scores = "WITHSCORES" in translated.args
             score_alias = translated.score_alias
+            no_content = self._has_return_0(translated.args)
 
-            if with_scores:
+            if with_scores and no_content:
+                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                for i in range(1, len(raw_result) - 1, 2):
+                    score = raw_result[i + 1]
+                    alias = score_alias or "__score"
+                    row = {alias: score}
+                    rows.append(row)
+            elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], ...]
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]

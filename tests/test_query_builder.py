@@ -567,3 +567,18 @@ class TestQueryBuilderEscaping:
             ["title", "description"], "FULLTEXT", "hello|world"
         )
         assert result == "(@title|description:hello\\|world)"
+
+    def test_or_terms_escape_special_chars(self):
+        """OR operands are escaped before joining with |."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR anti-virus"
+        )
+        # '-' is a RediSearch operator and should be escaped in OR terms
+        assert result == "@title:(laptop|anti\\-virus)"
+
+    def test_or_terms_escape_at_sign(self):
+        """OR operands escape @ to prevent field injection."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello OR @world")
+        assert result == "@title:(hello|\\@world)"

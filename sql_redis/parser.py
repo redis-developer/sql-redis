@@ -975,12 +975,16 @@ class SQLParser:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
             value = self._extract_literal_value(args[1])
 
-            # Optional 3rd arg: slop (int)
+            # Optional 3rd arg: slop (non-negative int)
             slop = None
             if len(args) >= 3:
                 slop_val = self._extract_literal_value(args[2])
                 if slop_val is not None:
                     slop = int(slop_val)
+                    if slop < 0:
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be a non-negative integer (got {slop})"
+                        )
 
             # Optional 4th arg: inorder (boolean-like: 1/0 or true/false)
             inorder = False

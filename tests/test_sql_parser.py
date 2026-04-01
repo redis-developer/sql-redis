@@ -855,3 +855,13 @@ class TestSQLParserExists:
         parser = SQLParser()
         with pytest.raises(ValueError, match="exists.*aggregate"):
             parser.parse("SELECT * FROM idx WHERE exists(email)")
+
+
+class TestSQLParserFulltextValidation:
+    """Tests for fulltext() argument validation."""
+
+    def test_fulltext_negative_slop_raises(self):
+        """Negative slop in fulltext() raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', -1)")

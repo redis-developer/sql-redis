@@ -173,8 +173,10 @@ class QueryBuilder:
             terms = " ".join(filtered_words) if filtered_words else value
             search_value = f"({terms})"
         elif " OR " in value:
-            # OR union within text field: split on ' OR ' and join with |
-            or_terms = [t.strip() for t in value.split(" OR ")]
+            # OR union within text field: split on ' OR ', escape each term, join with |
+            or_terms = [
+                self._escape_fulltext_term(t.strip()) for t in value.split(" OR ")
+            ]
             search_value = f"({'|'.join(or_terms)})"
         else:
             # Single-word FULLTEXT — escape to prevent accidental operator injection
