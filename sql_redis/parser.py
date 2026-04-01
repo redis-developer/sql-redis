@@ -459,6 +459,11 @@ class SQLParser:
             elif func_name_lower == "score":
                 # score() or score('BM25') — triggers WITHSCORES + SCORER
                 scorer = "BM25"
+                if len(expression.expressions) > 1:
+                    raise ValueError(
+                        f"score() expects at most one argument, "
+                        f"got {len(expression.expressions)}."
+                    )
                 if expression.expressions:
                     scorer_val = self._extract_literal_value(expression.expressions[0])
                     if scorer_val is not None:

@@ -832,3 +832,11 @@ class TestTranslatorScoring:
                 f"SELECT COUNT(*), score() AS relevance FROM {basic_index} "
                 "WHERE fulltext(title, 'laptop') GROUP BY category"
             )
+
+    def test_score_too_many_args_raises(self, translator: Translator, basic_index: str):
+        """score() with more than one argument raises ValueError."""
+        with pytest.raises(ValueError, match="at most one argument"):
+            translator.translate(
+                f"SELECT score('BM25', 'extra') AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop')"
+            )

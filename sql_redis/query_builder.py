@@ -187,7 +187,7 @@ class QueryBuilder:
                 if filtered_words:
                     sw_action = f"Stopwords {removed_stopwords} were removed from"
                 else:
-                    sw_action = f"All tokens in '{value}' are stopwords and may not be indexed by"
+                    sw_action = f"All tokens in '{value}' are stopwords and may not be indexed in"
                 warnings.warn(
                     f"{sw_action} text search '{value}'. "
                     "By default, Redis does not index stopwords. "
@@ -224,6 +224,8 @@ class QueryBuilder:
 
         # Append query attributes (slop, inorder) if specified
         if slop is not None:
+            if not isinstance(slop, int) or isinstance(slop, bool) or slop < 0:
+                raise ValueError(f"slop must be a non-negative integer (got {slop!r})")
             attrs = f"$slop: {slop};"
             if inorder:
                 attrs += " $inorder: true;"

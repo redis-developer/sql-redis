@@ -696,3 +696,21 @@ class TestQueryBuilderEscaping:
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "laptop OR ~gaming")
         assert result == "@title:(laptop|~gaming)"
+
+
+class TestQueryBuilderSlopValidation:
+    """Tests for slop validation at the QueryBuilder level."""
+
+    def test_slop_negative_raises(self):
+        """Negative slop raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            builder.build_text_condition("title", "FULLTEXT", "gaming laptop", slop=-1)
+
+    def test_slop_boolean_raises(self):
+        """Boolean slop raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            builder.build_text_condition(
+                "title", "FULLTEXT", "gaming laptop", slop=True
+            )
