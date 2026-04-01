@@ -116,10 +116,20 @@ class _ScoreParseMixin:
             return False
 
     @staticmethod
-    def _resolve_score_alias(score_alias: str | None, args: list[str]) -> str:
+    def _resolve_score_alias(
+        score_alias: str | None,
+        args: list[str],
+        first_row_fields: set[str] | None = None,
+    ) -> str:
         """Determine a stable score column name that won't collide with
         document fields.  The alias is decided once before iterating rows
-        so every row uses the same column name."""
+        so every row uses the same column name.
+
+        When a RETURN clause is present, the returned field names are used
+        for collision detection.  When RETURN is absent (SELECT *), the
+        caller should pass ``first_row_fields`` — the field names from the
+        first result row — so we can detect collisions even when all
+        document attributes are returned."""
         alias = score_alias or "__score"
         # Extract RETURN field names from args to detect collision
         try:
@@ -127,7 +137,7 @@ class _ScoreParseMixin:
             count = int(args[idx + 1])
             return_fields = set(args[idx + 2 : idx + 2 + count])
         except (ValueError, IndexError):
-            return_fields = set()
+            return_fields = first_row_fields or set()
         if alias in return_fields:
             alias = f"__score_{alias}"
         return alias
@@ -201,28 +211,35 @@ class Executor(_ScoreParseMixin):
             # RETURN 0 suppresses document fields (like NOCONTENT);
             # with WITHSCORES the reply is [count, id, score, id, score, ...]
             no_content = self._has_return_0(translated.args)
-            # Determine score column name once so every row is consistent
-            alias = (
-                self._resolve_score_alias(translated.score_alias, translated.args)
-                if with_scores
-                else ""
-            )
+
+            # Pre-resolve score alias; may be deferred for SELECT *
+            score_alias: str | None = None
 
             if with_scores and no_content:
                 # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
                 # Stride of 2: key, score (no field array)
+                score_alias = self._resolve_score_alias(
+                    translated.score_alias, translated.args
+                )
                 for i in range(1, len(raw_result) - 1, 2):
                     score = raw_result[i + 1]
-                    row = {alias: score}
+                    row = {score_alias: score}
                     rows.append(row)
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
                 # Stride of 3: key, score, field_list
+                # Resolve alias using first row's fields for SELECT * (no RETURN)
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    row[alias] = score
+                    if score_alias is None:
+                        score_alias = self._resolve_score_alias(
+                            translated.score_alias,
+                            translated.args,
+                            first_row_fields=set(row.keys()),
+                        )
+                    row[score_alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
@@ -318,17 +335,17 @@ class AsyncExecutor(_ScoreParseMixin):
         if translated.command == "FT.SEARCH":
             with_scores = "WITHSCORES" in translated.args
             no_content = self._has_return_0(translated.args)
-            alias = (
-                self._resolve_score_alias(translated.score_alias, translated.args)
-                if with_scores
-                else ""
-            )
+
+            score_alias: str | None = None
 
             if with_scores and no_content:
                 # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                score_alias = self._resolve_score_alias(
+                    translated.score_alias, translated.args
+                )
                 for i in range(1, len(raw_result) - 1, 2):
                     score = raw_result[i + 1]
-                    row = {alias: score}
+                    row = {score_alias: score}
                     rows.append(row)
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], ...]
@@ -336,7 +353,13 @@ class AsyncExecutor(_ScoreParseMixin):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    row[alias] = score
+                    if score_alias is None:
+                        score_alias = self._resolve_score_alias(
+                            translated.score_alias,
+                            translated.args,
+                            first_row_fields=set(row.keys()),
+                        )
+                    row[score_alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]

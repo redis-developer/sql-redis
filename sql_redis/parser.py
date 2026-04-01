@@ -1020,6 +1020,10 @@ class SQLParser:
             if len(args) >= 3:
                 level_val = self._extract_literal_value(args[2])
                 if level_val is not None:
+                    if isinstance(level_val, float) and level_val != int(level_val):
+                        raise ValueError(
+                            f"FUZZY level argument must be an integer (got {level_val})"
+                        )
                     fuzzy_level = int(level_val)
 
             if field_name is not None:

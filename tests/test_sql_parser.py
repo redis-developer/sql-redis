@@ -871,3 +871,9 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="must be an integer"):
             parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', 2.9)")
+
+    def test_fuzzy_float_level_raises(self):
+        """Float fuzzy level raises ValueError instead of silently truncating."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2.9)")
