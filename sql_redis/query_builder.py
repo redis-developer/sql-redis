@@ -154,10 +154,21 @@ class QueryBuilder:
                         "must contain at least one search term."
                     )
                 if len(words) > 1:
-                    escaped = " ".join(self._escape_fulltext_term(w) for w in words)
-                    or_parts.append(f"({escaped})")
+                    escaped_tokens = []
+                    for w in words:
+                        if w.startswith("~"):
+                            escaped_tokens.append(
+                                "~" + self._escape_fulltext_term(w[1:])
+                            )
+                        else:
+                            escaped_tokens.append(self._escape_fulltext_term(w))
+                    or_parts.append(f"({' '.join(escaped_tokens)})")
                 else:
-                    or_parts.append(self._escape_fulltext_term(words[0]))
+                    token = words[0]
+                    if token.startswith("~"):
+                        or_parts.append("~" + self._escape_fulltext_term(token[1:]))
+                    else:
+                        or_parts.append(self._escape_fulltext_term(token))
             search_value = f"({'|'.join(or_parts)})"
         elif " " in value:
             # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering.
@@ -173,8 +184,12 @@ class QueryBuilder:
             ]
 
             if removed_stopwords:
+                if filtered_words:
+                    sw_action = f"Stopwords {removed_stopwords} were removed from"
+                else:
+                    sw_action = f"All tokens in '{value}' are stopwords and may not be indexed by"
                 warnings.warn(
-                    f"Stopwords {removed_stopwords} were removed from text search '{value}'. "
+                    f"{sw_action} text search '{value}'. "
                     "By default, Redis does not index stopwords. "
                     "To include stopwords in your index, create it with STOPWORDS 0. "
                     "Use = operator for exact phrase matching that preserves stopwords.",

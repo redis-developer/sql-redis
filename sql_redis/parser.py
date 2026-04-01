@@ -462,7 +462,11 @@ class SQLParser:
                 if expression.expressions:
                     scorer_val = self._extract_literal_value(expression.expressions[0])
                     if scorer_val is not None:
-                        scorer = str(scorer_val).upper()
+                        scorer = str(scorer_val)
+                if result.scoring is not None:
+                    raise ValueError(
+                        "Only one score() expression is allowed per query."
+                    )
                 result.scoring = ScoringSpec(
                     alias=alias or "score",
                     scorer=scorer,

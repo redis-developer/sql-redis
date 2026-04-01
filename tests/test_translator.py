@@ -785,6 +785,25 @@ class TestTranslatorScoring:
         scorer_idx = result.args.index("SCORER")
         assert result.args[scorer_idx + 1] == "TFIDF"
 
+    def test_score_custom_scorer_preserves_case(
+        self, translator: Translator, basic_index: str
+    ):
+        """score('MyScorer') preserves caller-provided casing."""
+        result = translator.translate(
+            f"SELECT title, score('MyScorer') AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop')"
+        )
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "MyScorer"
+
+    def test_duplicate_score_raises(self, translator: Translator, basic_index: str):
+        """Multiple score() expressions in the same query raise ValueError."""
+        with pytest.raises(ValueError, match="Only one score"):
+            translator.translate(
+                f"SELECT score() AS s1, score('TFIDF') AS s2 FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop')"
+            )
+
     def test_no_score_no_withscores(self, translator: Translator, basic_index: str):
         """Without score() → no WITHSCORES flag."""
         result = translator.translate(
@@ -808,8 +827,6 @@ class TestTranslatorScoring:
         self, translator: Translator, basic_index: str
     ):
         """score() combined with GROUP BY (forces FT.AGGREGATE) raises ValueError."""
-        import pytest
-
         with pytest.raises(ValueError, match="score.*not supported.*FT.AGGREGATE"):
             translator.translate(
                 f"SELECT COUNT(*), score() AS relevance FROM {basic_index} "

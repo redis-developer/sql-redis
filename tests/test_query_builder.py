@@ -690,3 +690,9 @@ class TestQueryBuilderEscaping:
         builder = QueryBuilder()
         with pytest.raises(ValueError, match="Empty operand in OR expression"):
             builder.build_text_condition("title", "FULLTEXT", " OR tablet")
+
+    def test_or_preserves_optional_prefix(self):
+        """OR operand with ~ prefix preserves optional-term semantics."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop OR ~gaming")
+        assert result == "@title:(laptop|~gaming)"
