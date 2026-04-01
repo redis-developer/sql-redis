@@ -154,7 +154,7 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [x] Computed fields: `price * 0.9 AS discounted`
 - [x] Vector KNN search: `vector_distance(field, :param)`
 - [x] Hybrid search (filters + vector)
-- [x] Full-text search: `LIKE 'prefix%'` (prefix), `fulltext(field, 'terms')` function
+- [x] Full-text search: exact phrase, fuzzy, proximity, OR/union, LIKE patterns, BM25 scoring (see below)
 - [x] GEO field queries with full operator support (see below)
 - [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc. (see below)
 
@@ -165,6 +165,59 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [ ] HAVING clause
 - [ ] DISTINCT
 - [ ] Index creation from SQL (CREATE INDEX)
+
+### TEXT Search
+
+Full-text search on TEXT fields with multiple search modes:
+
+| Feature | SQL Syntax | RediSearch Output |
+|---------|-----------|-------------------|
+| Exact phrase | `title = 'gaming laptop'` | `@title:"gaming laptop"` |
+| Tokenized search | `fulltext(title, 'gaming laptop')` | `@title:(gaming laptop)` |
+| Fuzzy LD=1 | `fuzzy(title, 'laptap')` | `@title:%laptap%` |
+| Fuzzy LD=2 | `fuzzy(title, 'laptap', 2)` | `@title:%%laptap%%` |
+| Fuzzy LD=3 | `fuzzy(title, 'laptap', 3)` | `@title:%%%laptap%%%` |
+| OR / union | `fulltext(title, 'laptop OR tablet')` | `@title:(laptop\|tablet)` |
+| Prefix | `title LIKE 'lap%'` | `@title:lap*` |
+| Suffix | `title LIKE '%top'` | `@title:*top` |
+| Contains | `title LIKE '%apt%'` | `@title:*apt*` |
+| Proximity (slop) | `fulltext(title, 'gaming laptop', 2)` | `@title:(gaming laptop) => { $slop: 2; }` |
+| Proximity + order | `fulltext(title, 'gaming laptop', 2, true)` | `@title:(gaming laptop) => { $slop: 2; $inorder: true; }` |
+| Optional term | `fulltext(title, 'laptop ~gaming')` | `@title:(laptop ~gaming)` |
+| BM25 score | `SELECT score() AS relevance FROM idx` | `FT.SEARCH ... WITHSCORES` |
+| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:(refurbished)` |
+
+**Examples:**
+
+```sql
+-- Exact phrase match (stopwords preserved)
+SELECT * FROM products WHERE title = 'bank of america'
+
+-- Fuzzy search for typos (Levenshtein distance 2)
+SELECT * FROM products WHERE fuzzy(title, 'laptap', 2)
+
+-- OR search across terms
+SELECT * FROM products WHERE fulltext(title, 'laptop OR tablet OR phone')
+
+-- Proximity: terms within 3 words of each other, in order
+SELECT * FROM products WHERE fulltext(title, 'gaming laptop', 3, true)
+
+-- Suffix/contains pattern matching
+SELECT * FROM products WHERE title LIKE '%phone%'
+
+-- BM25 relevance scoring
+SELECT title, score() AS relevance FROM products WHERE fulltext(title, 'laptop')
+
+-- Multi-field search
+SELECT * FROM products WHERE fulltext(title, 'laptop') OR fulltext(description, 'laptop')
+```
+
+**Notes:**
+- `=` on TEXT fields performs **exact phrase** matching (preserves stopwords)
+- `fulltext()` performs **tokenized** search (stopwords are filtered with a warning)
+- `fuzzy()` and `fulltext()` only work on TEXT fields — using them on TAG or NUMERIC raises `ValueError`
+- OR is case-insensitive: `'laptop OR tablet'`, `'laptop or tablet'`, and `'laptop Or tablet'` all work
+- Special characters (`@`, `|`, `-`, `*`, `+`, etc.) in search terms are automatically escaped
 
 ### DATE/DATETIME Handling
 
