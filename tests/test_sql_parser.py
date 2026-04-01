@@ -889,3 +889,11 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="must be an integer"):
             parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', true)")
+
+    def test_fulltext_invalid_inorder_raises(self):
+        """Invalid inorder value (e.g., 'yes') raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="inorder argument must be a boolean"):
+            parser.parse(
+                "SELECT * FROM idx WHERE fulltext(title, 'hello world', 0, 'yes')"
+            )

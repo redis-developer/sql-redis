@@ -996,12 +996,20 @@ class SQLParser:
                             f"FULLTEXT slop argument must be a non-negative integer (got {slop})"
                         )
 
-            # Optional 4th arg: inorder (boolean-like: 1/0 or true/false)
+            # Optional 4th arg: inorder (boolean-like: true/false or 1/0)
             inorder = False
             if len(args) >= 4:
                 inorder_val = self._extract_literal_value(args[3])
                 if inorder_val is not None:
-                    inorder = str(inorder_val).lower() in ("1", "true")
+                    if isinstance(inorder_val, bool):
+                        inorder = inorder_val
+                    elif str(inorder_val).lower() in ("1", "0", "true", "false"):
+                        inorder = str(inorder_val).lower() in ("1", "true")
+                    else:
+                        raise ValueError(
+                            f"FULLTEXT inorder argument must be a boolean "
+                            f"(true/false or 1/0), got {inorder_val!r}"
+                        )
 
             if field_name is not None:
                 result.conditions.append(

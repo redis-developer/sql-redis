@@ -671,6 +671,13 @@ class TestTranslatorFuzzyLevels:
                 f"SELECT * FROM {basic_index} WHERE fulltext(price, 'laptop')"
             )
 
+    def test_like_on_tag_field_raises(self, translator: Translator, basic_index: str):
+        """LIKE on a TAG field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE category LIKE '%phone%'"
+            )
+
 
 class TestTranslatorSuffixInfix:
     """Tests for suffix and infix (contains) pattern matching.

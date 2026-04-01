@@ -624,3 +624,35 @@ class TestQueryBuilderEscaping:
             ["title", "description"], "FUZZY", "laptap", fuzzy_level=2
         )
         assert result == "(@title|description:%%laptap%%)"
+
+    def test_or_case_insensitive_lowercase(self):
+        """OR parsing is case-insensitive: 'laptop or tablet' works."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop or tablet")
+        assert result == "@title:(laptop|tablet)"
+
+    def test_or_case_insensitive_mixed(self):
+        """OR parsing is case-insensitive: 'laptop Or tablet' works."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop Or tablet")
+        assert result == "@title:(laptop|tablet)"
+
+    def test_or_extra_whitespace(self):
+        """OR parsing tolerates extra whitespace."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop  OR   tablet"
+        )
+        assert result == "@title:(laptop|tablet)"
+
+    def test_escape_asterisk_in_fulltext(self):
+        """Literal * in FULLTEXT is escaped to prevent wildcard."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello*world")
+        assert result == r"@title:hello\*world"
+
+    def test_escape_plus_in_fulltext(self):
+        """Literal + in FULLTEXT is escaped to prevent mandatory-term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "C++")
+        assert result == r"@title:C\+\+"

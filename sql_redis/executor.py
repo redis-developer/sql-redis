@@ -138,7 +138,7 @@ class _ScoreParseMixin:
             return_fields = set(args[idx + 2 : idx + 2 + count])
         except (ValueError, IndexError):
             return_fields = first_row_fields or set()
-        if alias in return_fields:
+        while alias in return_fields:
             alias = f"__score_{alias}"
         return alias
 

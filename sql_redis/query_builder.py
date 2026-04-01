@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 
 # Redis default stopwords - these are not indexed by default
@@ -54,7 +55,7 @@ class QueryBuilder:
     # Characters that have special meaning in RediSearch free-text queries
     # (outside double-quoted phrases). Must be escaped with backslash.
     # Includes double-quote to prevent starting/ending quoted phrases.
-    TEXT_QUERY_SPECIAL_CHARS = set('\\|-()"@~!{}[]^$><=;:')
+    TEXT_QUERY_SPECIAL_CHARS = set('\\|-()"@~!{}[]^$><=;:*+')
 
     @classmethod
     def _escape_fulltext_term(cls, term: str) -> str:
@@ -139,7 +140,15 @@ class QueryBuilder:
             # Exact phrase match — always wrap in quotes, preserve stopwords.
             escaped = self._escape_text_value(value)
             search_value = f'"{escaped}"'
-        elif " " in value and " OR " not in value:
+        elif re.search(r"\s+[Oo][Rr]\s+", value):
+            # OR union within text field: split on case-insensitive OR with
+            # flexible whitespace, escape each term, join with |
+            or_terms = [
+                self._escape_fulltext_term(t.strip())
+                for t in re.split(r"\s+[Oo][Rr]\s+", value)
+            ]
+            search_value = f"({'|'.join(or_terms)})"
+        elif " " in value:
             # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering.
             # Each term is escaped to prevent accidental operator injection, but a
             # leading ~ (optional-term modifier) is preserved as an intentional
@@ -172,12 +181,6 @@ class QueryBuilder:
 
             terms = " ".join(escaped_words)
             search_value = f"({terms})"
-        elif " OR " in value:
-            # OR union within text field: split on ' OR ', escape each term, join with |
-            or_terms = [
-                self._escape_fulltext_term(t.strip()) for t in value.split(" OR ")
-            ]
-            search_value = f"({'|'.join(or_terms)})"
         else:
             # Single-word FULLTEXT — escape to prevent accidental operator injection
             search_value = self._escape_fulltext_term(value)
