@@ -206,8 +206,14 @@ class AsyncExecutor:
         # Substitute non-bytes params in SQL
         sql = _substitute_params(sql, params)
 
-        # Translate SQL to Redis command (sync - no Redis calls)
-        translated = self._translator.translate(sql)
+        # Parse once, ensure schema is loaded (async lazy-load), then
+        # translate from the pre-parsed result to avoid double-parsing.
+        parsed = self._translator.parse(sql)
+        if parsed.index:
+            await self._schema_registry.ensure_schema(parsed.index)
+
+        # Translate from pre-parsed query (sync - no Redis calls)
+        translated = self._translator.translate_parsed(parsed)
 
         # Build command list and substitute vector params
         cmd: list[str | bytes] = list(translated.to_command_list())

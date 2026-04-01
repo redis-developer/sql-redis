@@ -11,6 +11,7 @@ from sql_redis.parser import (
     SQL_TO_REDIS_DATE_FUNCTIONS,
     Condition,
     GeoDistanceCondition,
+    ParsedQuery,
     SQLParser,
     parse_date_to_timestamp,
 )
@@ -54,6 +55,20 @@ class Translator:
         self._parser = SQLParser()
         self._query_builder = QueryBuilder()
 
+    def parse(self, sql: str) -> ParsedQuery:
+        """Parse a SQL SELECT into a ParsedQuery AST.
+
+        Useful when callers need the parsed result before translation
+        (e.g., to extract the index name for async schema loading).
+
+        Args:
+            sql: SQL SELECT statement.
+
+        Returns:
+            ParsedQuery with extracted index, fields, conditions, etc.
+        """
+        return self._parser.parse(sql)
+
     def translate(self, sql: str) -> TranslatedQuery:
         """Translate a SQL SELECT into a Redis search command.
 
@@ -66,11 +81,29 @@ class Translator:
         Raises:
             ValueError: If SQL is invalid or references unknown index/fields.
         """
-        # Parse
         parsed = self._parser.parse(sql)
+        return self.translate_parsed(parsed)
 
-        # Get schema and analyze
-        schemas = {parsed.index: self._schema_registry.get_schema(parsed.index)}
+    def translate_parsed(self, parsed: ParsedQuery) -> TranslatedQuery:
+        """Translate a pre-parsed query into a Redis search command.
+
+        This avoids re-parsing SQL when the caller has already parsed it
+        (e.g., AsyncExecutor extracts the index name before translation).
+
+        Args:
+            parsed: A ParsedQuery from SQLParser.parse().
+
+        Returns:
+            TranslatedQuery with command details.
+
+        Raises:
+            ValueError: If the index or a field is unknown.
+        """
+        # Get schema and analyze — raise early for missing indexes
+        schema = self._schema_registry.get_schema(parsed.index)
+        if not schema:
+            raise ValueError(f"Unknown index: {parsed.index}")
+        schemas = {parsed.index: schema}
         analyzer = Analyzer(schemas)
         analyzed = analyzer.analyze(parsed)
 
