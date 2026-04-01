@@ -980,6 +980,12 @@ class SQLParser:
             if len(args) >= 3:
                 slop_val = self._extract_literal_value(args[2])
                 if slop_val is not None:
+                    # Reject non-integer values (e.g. 2.9) instead of
+                    # silently truncating via int().
+                    if isinstance(slop_val, float) and slop_val != int(slop_val):
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be an integer (got {slop_val})"
+                        )
                     slop = int(slop_val)
                     if slop < 0:
                         raise ValueError(

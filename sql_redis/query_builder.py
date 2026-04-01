@@ -150,8 +150,9 @@ class QueryBuilder:
             search_value = f'"{escaped}"'
         elif " " in value and " OR " not in value:
             # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering.
-            # FULLTEXT is intentionally pass-through — users craft RediSearch queries
-            # via fulltext(), so operator chars like ~, |, - are preserved.
+            # Each term is escaped to prevent accidental operator injection, but a
+            # leading ~ (optional-term modifier) is preserved as an intentional
+            # RediSearch operator.
             words = value.split()
             removed_stopwords = [
                 w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
@@ -170,7 +171,15 @@ class QueryBuilder:
                     stacklevel=2,
                 )
 
-            terms = " ".join(filtered_words) if filtered_words else value
+            escaped_words = []
+            for w in (filtered_words if filtered_words else words):
+                if w.startswith("~"):
+                    # Preserve ~ optional-term prefix, escape the rest
+                    escaped_words.append("~" + self._escape_fulltext_term(w[1:]))
+                else:
+                    escaped_words.append(self._escape_fulltext_term(w))
+
+            terms = " ".join(escaped_words)
             search_value = f"({terms})"
         elif " OR " in value:
             # OR union within text field: split on ' OR ', escape each term, join with |

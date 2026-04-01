@@ -865,3 +865,9 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="non-negative integer"):
             parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', -1)")
+
+    def test_fulltext_float_slop_raises(self):
+        """Float slop in fulltext() raises ValueError instead of silently truncating."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', 2.9)")

@@ -104,7 +104,7 @@ class QueryResult:
 
 
 class _ScoreParseMixin:
-    """Shared helper for detecting RETURN 0 (NOCONTENT) in translated args."""
+    """Shared helpers for score-related response parsing."""
 
     @staticmethod
     def _has_return_0(args: list[str]) -> bool:
@@ -114,6 +114,23 @@ class _ScoreParseMixin:
             return args[idx + 1] == "0"
         except (ValueError, IndexError):
             return False
+
+    @staticmethod
+    def _resolve_score_alias(score_alias: str | None, args: list[str]) -> str:
+        """Determine a stable score column name that won't collide with
+        document fields.  The alias is decided once before iterating rows
+        so every row uses the same column name."""
+        alias = score_alias or "__score"
+        # Extract RETURN field names from args to detect collision
+        try:
+            idx = args.index("RETURN")
+            count = int(args[idx + 1])
+            return_fields = set(args[idx + 2 : idx + 2 + count])
+        except (ValueError, IndexError):
+            return_fields = set()
+        if alias in return_fields:
+            alias = f"__score_{alias}"
+        return alias
 
 
 class Executor(_ScoreParseMixin):
@@ -181,17 +198,21 @@ class Executor(_ScoreParseMixin):
         if translated.command == "FT.SEARCH":
             # Check if WITHSCORES was requested — changes response format
             with_scores = "WITHSCORES" in translated.args
-            score_alias = translated.score_alias
             # RETURN 0 suppresses document fields (like NOCONTENT);
             # with WITHSCORES the reply is [count, id, score, id, score, ...]
             no_content = self._has_return_0(translated.args)
+            # Determine score column name once so every row is consistent
+            alias = (
+                self._resolve_score_alias(translated.score_alias, translated.args)
+                if with_scores
+                else ""
+            )
 
             if with_scores and no_content:
                 # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
                 # Stride of 2: key, score (no field array)
                 for i in range(1, len(raw_result) - 1, 2):
                     score = raw_result[i + 1]
-                    alias = score_alias or "__score"
                     row = {alias: score}
                     rows.append(row)
             elif with_scores:
@@ -201,10 +222,6 @@ class Executor(_ScoreParseMixin):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    alias = score_alias or "__score"
-                    # Guard: if alias collides with a document field, prefix it
-                    if alias in row:
-                        alias = f"__score_{alias}"
                     row[alias] = score
                     rows.append(row)
             else:
@@ -300,14 +317,17 @@ class AsyncExecutor(_ScoreParseMixin):
 
         if translated.command == "FT.SEARCH":
             with_scores = "WITHSCORES" in translated.args
-            score_alias = translated.score_alias
             no_content = self._has_return_0(translated.args)
+            alias = (
+                self._resolve_score_alias(translated.score_alias, translated.args)
+                if with_scores
+                else ""
+            )
 
             if with_scores and no_content:
                 # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
                 for i in range(1, len(raw_result) - 1, 2):
                     score = raw_result[i + 1]
-                    alias = score_alias or "__score"
                     row = {alias: score}
                     rows.append(row)
             elif with_scores:
@@ -316,9 +336,6 @@ class AsyncExecutor(_ScoreParseMixin):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    alias = score_alias or "__score"
-                    if alias in row:
-                        alias = f"__score_{alias}"
                     row[alias] = score
                     rows.append(row)
             else:

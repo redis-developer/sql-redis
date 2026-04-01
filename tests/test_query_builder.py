@@ -582,3 +582,21 @@ class TestQueryBuilderEscaping:
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "hello OR @world")
         assert result == "@title:(hello|\\@world)"
+
+    def test_multiword_fulltext_escapes_special_chars(self):
+        """Multi-word FULLTEXT escapes dangerous chars like @ and |."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello @world")
+        assert result == "@title:(hello \\@world)"
+
+    def test_multiword_fulltext_preserves_optional_prefix(self):
+        """Multi-word FULLTEXT preserves ~ optional-term prefix."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop ~gaming")
+        assert result == "@title:(laptop ~gaming)"
+
+    def test_multiword_fulltext_escapes_dash(self):
+        """Multi-word FULLTEXT escapes - to prevent accidental negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello anti-virus")
+        assert result == "@title:(hello anti\\-virus)"
