@@ -157,6 +157,8 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [x] Full-text search: exact phrase, fuzzy, proximity, OR/union, LIKE patterns, BM25 scoring (see below)
 - [x] GEO field queries with full operator support (see below)
 - [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc. (see below)
+- [x] `IS NULL` / `IS NOT NULL` via `ismissing()` (requires Redis 7.4+, see below)
+- [x] `exists()` function for field presence checks (see below)
 
 ## What's Not Implemented (Yet...)
 
@@ -218,6 +220,45 @@ SELECT * FROM products WHERE fulltext(title, 'laptop') OR fulltext(description, 
 - `fuzzy()` and `fulltext()` only work on TEXT fields — using them on TAG or NUMERIC raises `ValueError`
 - OR is case-insensitive: `'laptop OR tablet'`, `'laptop or tablet'`, and `'laptop Or tablet'` all work
 - Special characters (`@`, `|`, `-`, `*`, `+`, etc.) in search terms are automatically escaped
+
+### IS NULL / IS NOT NULL (ismissing)
+
+Check for missing (absent) fields using standard SQL `IS NULL` / `IS NOT NULL` syntax. Requires **Redis 7.4+** (RediSearch 2.10+) with `INDEXMISSING` declared on the field.
+
+| SQL | RediSearch Output |
+|-----|-------------------|
+| `WHERE email IS NULL` | `ismissing(@email)` |
+| `WHERE email IS NOT NULL` | `-ismissing(@email)` |
+
+```sql
+-- Find users without an email
+SELECT * FROM users WHERE email IS NULL
+
+-- Find users with an email
+SELECT * FROM users WHERE email IS NOT NULL
+
+-- Combine with other filters
+SELECT * FROM users WHERE category = 'eng' AND email IS NULL
+```
+
+**Note:** The field must be declared with `INDEXMISSING` in the index schema. A warning is emitted at translation time as a reminder.
+
+### exists() — Field Presence Check
+
+Check whether a field has a value using `exists()` in SELECT or HAVING. This uses `FT.AGGREGATE` with `APPLY exists(@field)`.
+
+```sql
+-- Check if fields exist (returns 1 or 0)
+SELECT name, exists(email) AS has_email FROM users
+
+-- Filter to only rows where a field exists
+SELECT name FROM users HAVING exists(email) = 1
+
+-- Combine with other computed fields
+SELECT name, exists(email) AS has_email, exists(phone) AS has_phone FROM users
+```
+
+**Note:** `exists()` is different from `IS NOT NULL` — it works via `FT.AGGREGATE APPLY` and doesn't require `INDEXMISSING` on the field, but returns `1`/`0` rather than filtering rows directly.
 
 ### DATE/DATETIME Handling
 

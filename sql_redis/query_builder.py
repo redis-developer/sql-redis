@@ -142,12 +142,18 @@ class QueryBuilder:
             search_value = f'"{escaped}"'
         elif re.search(r"\s+[Oo][Rr]\s+", value):
             # OR union within text field: split on case-insensitive OR with
-            # flexible whitespace, escape each term, join with |
-            or_terms = [
-                self._escape_fulltext_term(t.strip())
-                for t in re.split(r"\s+[Oo][Rr]\s+", value)
-            ]
-            search_value = f"({'|'.join(or_terms)})"
+            # flexible whitespace, escape each term, join with |.
+            # Multi-word operands (e.g. "gaming laptop OR tablet") are wrapped
+            # in parentheses so each side is an atomic subexpression.
+            or_parts: list[str] = []
+            for part in re.split(r"\s+[Oo][Rr]\s+", value):
+                words = part.strip().split()
+                if len(words) > 1:
+                    escaped = " ".join(self._escape_fulltext_term(w) for w in words)
+                    or_parts.append(f"({escaped})")
+                else:
+                    or_parts.append(self._escape_fulltext_term(words[0]))
+            search_value = f"({'|'.join(or_parts)})"
         elif " " in value:
             # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering.
             # Each term is escaped to prevent accidental operator injection, but a
@@ -182,8 +188,12 @@ class QueryBuilder:
             terms = " ".join(escaped_words)
             search_value = f"({terms})"
         else:
-            # Single-word FULLTEXT — escape to prevent accidental operator injection
-            search_value = self._escape_fulltext_term(value)
+            # Single-word FULLTEXT — escape to prevent accidental operator injection.
+            # Preserve ~ optional-term prefix (same as multi-word branch).
+            if value.startswith("~"):
+                search_value = "~" + self._escape_fulltext_term(value[1:])
+            else:
+                search_value = self._escape_fulltext_term(value)
 
         # Handle multi-field search — use computed search_value with multi-field syntax
         if isinstance(field, list):

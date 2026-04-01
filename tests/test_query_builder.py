@@ -656,3 +656,25 @@ class TestQueryBuilderEscaping:
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "C++")
         assert result == r"@title:C\+\+"
+
+    def test_single_term_optional_prefix_preserved(self):
+        """Single-term FULLTEXT with ~ prefix preserves optional semantics."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "~gaming")
+        assert result == "@title:~gaming"
+
+    def test_or_multiword_operand_grouped(self):
+        """OR with multi-word operand wraps it in parentheses."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop OR tablet"
+        )
+        assert result == "@title:((gaming laptop)|tablet)"
+
+    def test_or_both_multiword_operands_grouped(self):
+        """OR with multi-word operands on both sides wraps each."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop OR android tablet"
+        )
+        assert result == "@title:((gaming laptop)|(android tablet))"
