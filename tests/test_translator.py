@@ -655,6 +655,22 @@ class TestTranslatorFuzzyLevels:
         )
         assert "@title:%%%laptap%%%" in result.query_string
 
+    def test_fuzzy_on_tag_field_raises(self, translator: Translator, basic_index: str):
+        """fuzzy() on a TAG field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE fuzzy(category, 'laptap')"
+            )
+
+    def test_fulltext_on_numeric_field_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """fulltext() on a NUMERIC field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE fulltext(price, 'laptop')"
+            )
+
 
 class TestTranslatorSuffixInfix:
     """Tests for suffix and infix (contains) pattern matching.

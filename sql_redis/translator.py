@@ -226,6 +226,15 @@ class Translator:
                 condition.field, is_missing=(condition.operator == "IS_NULL")
             )
 
+        # Reject text-only operators on non-TEXT fields — fuzzy() and fulltext()
+        # only make sense for TEXT fields; silently falling through to TAG/NUMERIC
+        # would produce incorrect queries.
+        if condition.operator in ("FUZZY", "FULLTEXT") and field_type != "TEXT":
+            raise ValueError(
+                f"{condition.operator.lower()}() can only be used on TEXT fields, "
+                f"but '{condition.field}' is {field_type or 'unknown'}."
+            )
+
         # Resolve negation using XOR so that double negation cancels out.
         # e.g. NOT (field != 'x') → negated=True, op='!=' → is_negated=False.
         operator = condition.operator

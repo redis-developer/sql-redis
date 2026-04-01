@@ -980,8 +980,12 @@ class SQLParser:
             if len(args) >= 3:
                 slop_val = self._extract_literal_value(args[2])
                 if slop_val is not None:
-                    # Reject non-integer values (e.g. 2.9) instead of
-                    # silently truncating via int().
+                    # Reject booleans and non-integer floats — only real
+                    # integers are valid for slop.
+                    if isinstance(slop_val, bool):
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be an integer (got {slop_val})"
+                        )
                     if isinstance(slop_val, float) and slop_val != int(slop_val):
                         raise ValueError(
                             f"FULLTEXT slop argument must be an integer (got {slop_val})"
@@ -1020,6 +1024,10 @@ class SQLParser:
             if len(args) >= 3:
                 level_val = self._extract_literal_value(args[2])
                 if level_val is not None:
+                    if isinstance(level_val, bool):
+                        raise ValueError(
+                            f"FUZZY level argument must be an integer (got {level_val})"
+                        )
                     if isinstance(level_val, float) and level_val != int(level_val):
                         raise ValueError(
                             f"FUZZY level argument must be an integer (got {level_val})"

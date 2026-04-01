@@ -117,16 +117,7 @@ class QueryBuilder:
         # consistent with how build_tag_condition handles != via operator.
         prefix = "-" if negated or operator == "!=" else ""
 
-        # Handle multi-field search — apply same escaping/operator semantics
-        if isinstance(field, list):
-            field_str = "|".join(field)
-            if operator in ("=", "!="):
-                escaped = self._escape_text_value(value)
-                return f'{prefix}(@{field_str}:"{escaped}")'
-            escaped = self._escape_fulltext_term(value)
-            return f"{prefix}(@{field_str}:{escaped})"
-
-        # Handle different operators
+        # Build search_value based on operator — shared by single- and multi-field paths
         if operator == "LIKE":
             # Escape special chars in the non-wildcard portion, then convert % → *
             # Split on %, escape each segment, rejoin with *
@@ -191,7 +182,12 @@ class QueryBuilder:
             # Single-word FULLTEXT — escape to prevent accidental operator injection
             search_value = self._escape_fulltext_term(value)
 
-        base = f"{prefix}@{field}:{search_value}"
+        # Handle multi-field search — use computed search_value with multi-field syntax
+        if isinstance(field, list):
+            field_str = "|".join(field)
+            base = f"{prefix}(@{field_str}:{search_value})"
+        else:
+            base = f"{prefix}@{field}:{search_value}"
 
         # Append query attributes (slop, inorder) if specified
         if slop is not None:

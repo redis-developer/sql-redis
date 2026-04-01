@@ -600,3 +600,27 @@ class TestQueryBuilderEscaping:
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "hello anti-virus")
         assert result == "@title:(hello anti\\-virus)"
+
+    def test_multi_field_multiword_fulltext(self):
+        """Multi-field with multi-word FULLTEXT scopes all terms to fields."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "gaming laptop"
+        )
+        assert result == "(@title|description:(gaming laptop))"
+
+    def test_multi_field_or_fulltext(self):
+        """Multi-field with OR FULLTEXT uses pipe-separated terms."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "laptop OR tablet"
+        )
+        assert result == "(@title|description:(laptop|tablet))"
+
+    def test_multi_field_fuzzy(self):
+        """Multi-field with FUZZY wraps with % markers."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FUZZY", "laptap", fuzzy_level=2
+        )
+        assert result == "(@title|description:%%laptap%%)"

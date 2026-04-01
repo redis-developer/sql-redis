@@ -877,3 +877,15 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="must be an integer"):
             parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2.9)")
+
+    def test_fulltext_boolean_slop_raises(self):
+        """Boolean slop in fulltext() raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', true)")
+
+    def test_fuzzy_boolean_level_raises(self):
+        """Boolean fuzzy level raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', true)")
