@@ -230,8 +230,13 @@ class Translator:
         # only make sense for TEXT fields; silently falling through to TAG/NUMERIC
         # would produce incorrect queries.
         if condition.operator in ("FUZZY", "FULLTEXT", "LIKE") and field_type != "TEXT":
+            op_display = (
+                "LIKE"
+                if condition.operator == "LIKE"
+                else f"{condition.operator.lower()}()"
+            )
             raise ValueError(
-                f"{condition.operator.lower()}() can only be used on TEXT fields, "
+                f"{op_display} can only be used on TEXT fields, "
                 f"but '{condition.field}' is {field_type or 'unknown'}."
             )
 

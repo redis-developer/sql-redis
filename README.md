@@ -187,7 +187,7 @@ Full-text search on TEXT fields with multiple search modes:
 | Proximity + order | `fulltext(title, 'gaming laptop', 2, true)` | `@title:(gaming laptop) => { $slop: 2; $inorder: true; }` |
 | Optional term | `fulltext(title, 'laptop ~gaming')` | `@title:(laptop ~gaming)` |
 | BM25 score | `SELECT score() AS relevance FROM idx` | `FT.SEARCH ... WITHSCORES` |
-| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:(refurbished)` |
+| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:refurbished` |
 
 **Examples:**
 

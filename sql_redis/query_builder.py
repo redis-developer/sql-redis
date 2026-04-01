@@ -148,6 +148,11 @@ class QueryBuilder:
             or_parts: list[str] = []
             for part in re.split(r"\s+[Oo][Rr]\s+", value):
                 words = part.strip().split()
+                if not words:
+                    raise ValueError(
+                        "Empty operand in OR expression — each side of OR "
+                        "must contain at least one search term."
+                    )
                 if len(words) > 1:
                     escaped = " ".join(self._escape_fulltext_term(w) for w in words)
                     or_parts.append(f"({escaped})")

@@ -678,3 +678,15 @@ class TestQueryBuilderEscaping:
             "title", "FULLTEXT", "gaming laptop OR android tablet"
         )
         assert result == "@title:((gaming laptop)|(android tablet))"
+
+    def test_or_trailing_empty_operand_raises(self):
+        """Trailing OR with empty operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand in OR expression"):
+            builder.build_text_condition("title", "FULLTEXT", "laptop OR ")
+
+    def test_or_leading_empty_operand_raises(self):
+        """Leading OR with empty operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand in OR expression"):
+            builder.build_text_condition("title", "FULLTEXT", " OR tablet")
