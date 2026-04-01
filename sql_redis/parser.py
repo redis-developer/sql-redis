@@ -980,6 +980,12 @@ class SQLParser:
         func_name = expression.name.upper()
         args = expression.expressions
 
+        if func_name in ("FULLTEXT", "FUZZY") and len(args) < 2:
+            raise ValueError(
+                f"{func_name.lower()}() requires at least 2 arguments: "
+                f"{func_name.lower()}(field, value), got {len(args)}."
+            )
+
         if func_name == "FULLTEXT" and len(args) >= 2:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
             value = self._extract_literal_value(args[1])

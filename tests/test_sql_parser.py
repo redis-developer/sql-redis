@@ -622,12 +622,10 @@ class TestSQLParserEdgeCases:
         assert len(result.conditions) == 0
 
     def test_parse_fulltext_insufficient_args(self):
-        """Parse fulltext with insufficient arguments."""
+        """Parse fulltext with insufficient arguments raises ValueError."""
         parser = SQLParser()
-        result = parser.parse("SELECT * FROM products WHERE fulltext(title)")
-
-        # Only 1 arg, needs >= 2 - condition skipped
-        assert len(result.conditions) == 0
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM products WHERE fulltext(title)")
 
     def test_parse_geo_distance_no_args(self):
         """Parse geo_distance with no arguments in comparison."""
@@ -897,3 +895,15 @@ class TestSQLParserFulltextValidation:
             parser.parse(
                 "SELECT * FROM idx WHERE fulltext(title, 'hello world', 0, 'yes')"
             )
+
+    def test_fulltext_no_value_raises(self):
+        """fulltext() with only field arg raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title)")
+
+    def test_fuzzy_no_value_raises(self):
+        """fuzzy() with only field arg raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title)")

@@ -125,6 +125,12 @@ class QueryBuilder:
             parts = value.split("%")
             escaped_parts = [self._escape_fulltext_term(p) for p in parts]
             search_value = "*".join(escaped_parts)
+            # If the non-wildcard portion contains spaces, wrap in parens
+            # so all tokens stay scoped to the field (e.g. '%gaming laptop%'
+            # → *gaming laptop* needs grouping to avoid token leaking).
+            non_wildcard = value.strip("%")
+            if " " in non_wildcard:
+                search_value = f"({search_value})"
         elif operator == "FUZZY":
             # Escape special chars before wrapping with % markers
             escaped = self._escape_fulltext_term(value)

@@ -427,6 +427,12 @@ class TestQueryBuilderSuffixInfix:
         result = builder.build_text_condition("title", "LIKE", "%phone", negated=True)
         assert result == "-@title:*phone"
 
+    def test_infix_multiword_grouped(self):
+        """LIKE '%multi word%' groups tokens in parentheses."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%gaming laptop%")
+        assert result == "@title:(*gaming laptop*)"
+
 
 class TestQueryBuilderORInText:
     """Tests for OR/union within text field searches."""
