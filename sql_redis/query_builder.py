@@ -146,13 +146,16 @@ class QueryBuilder:
             # Exact phrase match — always wrap in quotes, preserve stopwords.
             escaped = self._escape_text_value(value)
             search_value = f'"{escaped}"'
-        elif re.search(r"\s+[Oo][Rr]\s+", value):
-            # OR union within text field: split on case-insensitive OR with
+        elif re.search(r"\s+OR\s+", value):
+            # OR union within text field: split on uppercase-only OR with
             # flexible whitespace, escape each term, join with |.
+            # Only uppercase OR is treated as a boolean operator; lowercase
+            # "or" is treated as a regular search term (e.g. "bank or america"
+            # stays as a multi-word AND search, not bank|america).
             # Multi-word operands (e.g. "gaming laptop OR tablet") are wrapped
             # in parentheses so each side is an atomic subexpression.
             or_parts: list[str] = []
-            for part in re.split(r"\s+[Oo][Rr]\s+", value):
+            for part in re.split(r"\s+OR\s+", value):
                 words = part.strip().split()
                 if not words:
                     raise ValueError(

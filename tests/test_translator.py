@@ -840,3 +840,34 @@ class TestTranslatorScoring:
                 f"SELECT score('BM25', 'extra') AS relevance FROM {basic_index} "
                 "WHERE fulltext(title, 'laptop')"
             )
+
+    def test_order_by_score_desc_omits_sortby(
+        self, translator: Translator, basic_index: str
+    ):
+        """ORDER BY score_alias DESC omits SORTBY (RediSearch sorts by relevance by default)."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop') ORDER BY relevance DESC"
+        )
+        assert "WITHSCORES" in result.args
+        assert "SORTBY" not in result.args
+
+    def test_order_by_score_asc_raises(self, translator: Translator, basic_index: str):
+        """ORDER BY score_alias ASC raises ValueError (not supported by RediSearch)."""
+        with pytest.raises(ValueError, match="ASC is not supported"):
+            translator.translate(
+                f"SELECT title, score() AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop') ORDER BY relevance ASC"
+            )
+
+    def test_order_by_real_field_with_score_still_works(
+        self, translator: Translator, basic_index: str
+    ):
+        """ORDER BY a real field (not score alias) still emits SORTBY."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop') ORDER BY price DESC"
+        )
+        assert "SORTBY" in result.args
+        idx = result.args.index("SORTBY")
+        assert result.args[idx + 1] == "price"

@@ -361,10 +361,25 @@ class Translator:
             args.append(str(len(return_fields)))
             args.extend(return_fields)
 
-        # SORTBY
+        # SORTBY — skip if the ORDER BY field is a score() alias, because
+        # WITHSCORES already returns results in relevance order and the alias
+        # is not a sortable indexed field.
+        score_alias_name = parsed.scoring.alias if parsed.scoring else None
         if parsed.orderby_fields:
             field_name, direction = parsed.orderby_fields[0]
-            args.extend(["SORTBY", field_name, direction])
+            if field_name == score_alias_name:
+                # score() alias — not a real field; RediSearch sorts by
+                # relevance by default when no SORTBY is specified.
+                if direction == "ASC":
+                    raise ValueError(
+                        f"ORDER BY {field_name} ASC is not supported: "
+                        "RediSearch returns results in descending relevance "
+                        "order by default and does not support ascending "
+                        "score sorting via FT.SEARCH."
+                    )
+                # DESC is the default — omit SORTBY entirely
+            else:
+                args.extend(["SORTBY", field_name, direction])
 
         # LIMIT
         if parsed.limit is not None:

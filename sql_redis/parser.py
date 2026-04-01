@@ -986,6 +986,16 @@ class SQLParser:
                 f"{func_name.lower()}(field, value), got {len(args)}."
             )
 
+        # Validate max argument counts to catch typos / misuse early.
+        # fulltext(field, value [, slop [, inorder]]) → max 4
+        # fuzzy(field, value [, level])               → max 3
+        _max_args = {"FULLTEXT": 4, "FUZZY": 3}
+        if func_name in _max_args and len(args) > _max_args[func_name]:
+            raise ValueError(
+                f"{func_name.lower()}() accepts at most {_max_args[func_name]} "
+                f"arguments, got {len(args)}."
+            )
+
         if func_name == "FULLTEXT" and len(args) >= 2:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
             value = self._extract_literal_value(args[1])

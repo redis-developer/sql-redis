@@ -631,17 +631,27 @@ class TestQueryBuilderEscaping:
         )
         assert result == "(@title|description:%%laptap%%)"
 
-    def test_or_case_insensitive_lowercase(self):
-        """OR parsing is case-insensitive: 'laptop or tablet' works."""
+    def test_lowercase_or_is_not_boolean(self):
+        """Lowercase 'or' is treated as a regular search term, not a boolean operator.
+
+        'bank or america' should NOT become bank|america — it should be a
+        multi-word AND-style search with stopword filtering applied to 'or'.
+        """
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "laptop or tablet")
-        assert result == "@title:(laptop|tablet)"
+        # "or" is a stopword; remaining terms are "laptop" and "tablet"
+        assert result == "@title:(laptop tablet)"
 
-    def test_or_case_insensitive_mixed(self):
-        """OR parsing is case-insensitive: 'laptop Or tablet' works."""
+    def test_mixed_case_or_is_not_boolean(self):
+        """Mixed case 'Or' / 'oR' is treated as a regular term, not boolean OR.
+
+        Only uppercase 'OR' triggers the union operator.
+        'Or' is a stopword (or → stopword list), so it gets removed.
+        """
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "FULLTEXT", "laptop Or tablet")
-        assert result == "@title:(laptop|tablet)"
+        # "Or" lowercases to "or" which is a stopword; remaining: laptop tablet
+        assert result == "@title:(laptop tablet)"
 
     def test_or_extra_whitespace(self):
         """OR parsing tolerates extra whitespace."""

@@ -907,3 +907,17 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="requires at least 2 arguments"):
             parser.parse("SELECT * FROM idx WHERE fuzzy(title)")
+
+    def test_fulltext_too_many_args_raises(self):
+        """fulltext() with more than 4 arguments raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="at most 4 arguments"):
+            parser.parse(
+                "SELECT * FROM idx WHERE fulltext(title, 'hello world', 2, true, 'extra')"
+            )
+
+    def test_fuzzy_too_many_args_raises(self):
+        """fuzzy() with more than 3 arguments raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="at most 3 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2, 'extra')")

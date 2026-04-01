@@ -228,18 +228,20 @@ class Executor(_ScoreParseMixin):
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
                 # Stride of 3: key, score, field_list
-                # Resolve alias using first row's fields for SELECT * (no RETURN)
+                # Resolve alias per-row: FT.SEARCH may omit missing attributes,
+                # so different rows can have different field sets.  We must
+                # check each row individually to avoid overwriting a real field
+                # with the score value.
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    if score_alias is None:
-                        score_alias = self._resolve_score_alias(
-                            translated.score_alias,
-                            translated.args,
-                            first_row_fields=set(row.keys()),
-                        )
-                    row[score_alias] = score
+                    row_score_alias = self._resolve_score_alias(
+                        translated.score_alias,
+                        translated.args,
+                        first_row_fields=set(row.keys()),
+                    )
+                    row[row_score_alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
@@ -349,17 +351,17 @@ class AsyncExecutor(_ScoreParseMixin):
                     rows.append(row)
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], ...]
+                # Resolve alias per-row to avoid field collision on later rows.
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    if score_alias is None:
-                        score_alias = self._resolve_score_alias(
-                            translated.score_alias,
-                            translated.args,
-                            first_row_fields=set(row.keys()),
-                        )
-                    row[score_alias] = score
+                    row_score_alias = self._resolve_score_alias(
+                        translated.score_alias,
+                        translated.args,
+                        first_row_fields=set(row.keys()),
+                    )
+                    row[row_score_alias] = score
                     rows.append(row)
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
