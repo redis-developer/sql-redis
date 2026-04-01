@@ -612,14 +612,10 @@ class TestSQLParserEdgeCases:
         assert len(result.conditions) == 0
 
     def test_parse_fulltext_non_column_first_arg(self):
-        """Parse fulltext with non-column first argument."""
+        """Parse fulltext with non-column first argument raises ValueError."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM products WHERE fulltext(UPPER(title), 'query')"
-        )
-
-        # First arg is a function, not Column - condition skipped
-        assert len(result.conditions) == 0
+        with pytest.raises(ValueError, match="must be a column name"):
+            parser.parse("SELECT * FROM products WHERE fulltext(UPPER(title), 'query')")
 
     def test_parse_fulltext_insufficient_args(self):
         """Parse fulltext with insufficient arguments raises ValueError."""
@@ -921,3 +917,17 @@ class TestSQLParserFulltextValidation:
         parser = SQLParser()
         with pytest.raises(ValueError, match="at most 3 arguments"):
             parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2, 'extra')")
+
+    def test_fuzzy_non_column_first_arg_raises(self):
+        """fuzzy() with non-column first argument raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be a column name"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy('title', 'laptap')")
+
+    def test_score_non_literal_arg_raises(self):
+        """score() with a non-literal argument (e.g., column ref) raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be a literal scorer name"):
+            parser.parse(
+                "SELECT score(my_column) AS relevance FROM idx WHERE fulltext(title, 'laptop')"
+            )

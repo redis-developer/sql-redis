@@ -466,8 +466,12 @@ class SQLParser:
                     )
                 if expression.expressions:
                     scorer_val = self._extract_literal_value(expression.expressions[0])
-                    if scorer_val is not None:
-                        scorer = str(scorer_val)
+                    if scorer_val is None:
+                        raise ValueError(
+                            "score() argument must be a literal scorer name "
+                            f"(e.g., 'BM25', 'TFIDF'), got {expression.expressions[0]}."
+                        )
+                    scorer = str(scorer_val)
                 if result.scoring is not None:
                     raise ValueError(
                         "Only one score() expression is allowed per query."
@@ -1036,17 +1040,21 @@ class SQLParser:
                             f"(true/false or 1/0), got {inorder_val!r}"
                         )
 
-            if field_name is not None:
-                result.conditions.append(
-                    Condition(
-                        field=field_name,
-                        operator="FULLTEXT",
-                        value=value,
-                        negated=negated,
-                        slop=slop,
-                        inorder=inorder,
-                    )
+            if field_name is None:
+                raise ValueError(
+                    "fulltext() first argument must be a column name, "
+                    f"got {args[0]}. Usage: fulltext(field, 'search terms')"
                 )
+            result.conditions.append(
+                Condition(
+                    field=field_name,
+                    operator="FULLTEXT",
+                    value=value,
+                    negated=negated,
+                    slop=slop,
+                    inorder=inorder,
+                )
+            )
 
         elif func_name == "FUZZY" and len(args) >= 2:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
@@ -1067,16 +1075,20 @@ class SQLParser:
                         )
                     fuzzy_level = int(level_val)
 
-            if field_name is not None:
-                result.conditions.append(
-                    Condition(
-                        field=field_name,
-                        operator="FUZZY",
-                        value=value,
-                        negated=negated,
-                        fuzzy_level=fuzzy_level,
-                    )
+            if field_name is None:
+                raise ValueError(
+                    "fuzzy() first argument must be a column name, "
+                    f"got {args[0]}. Usage: fuzzy(field, 'search term')"
                 )
+            result.conditions.append(
+                Condition(
+                    field=field_name,
+                    operator="FUZZY",
+                    value=value,
+                    negated=negated,
+                    fuzzy_level=fuzzy_level,
+                )
+            )
 
     def _extract_literal_value(self, expression, convert_dates: bool = False):
         """Extract a Python value from a sqlglot Literal or Neg expression.
