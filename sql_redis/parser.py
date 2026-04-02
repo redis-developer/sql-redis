@@ -476,6 +476,12 @@ class SQLParser:
                             "score() argument must be a string scorer name "
                             f"(e.g., 'BM25', 'TFIDF'), got {scorer_val!r}."
                         )
+                    if not scorer_val:
+                        raise ValueError(
+                            "score() scorer name must not be empty. "
+                            "Use score() with no arguments for the default "
+                            "BM25 scorer, or pass a valid name like 'TFIDF'."
+                        )
                     scorer = scorer_val
                 if result.scoring is not None:
                     raise ValueError(

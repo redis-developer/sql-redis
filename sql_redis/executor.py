@@ -209,8 +209,10 @@ class Executor(_ScoreParseMixin):
         rows = []
 
         if translated.command == "FT.SEARCH":
-            # Check if WITHSCORES was requested — changes response format
-            with_scores = "WITHSCORES" in translated.args
+            # Use the explicit score_alias signal rather than scanning args
+            # for the literal token "WITHSCORES", which could false-positive
+            # if a returned field happened to be named "WITHSCORES".
+            with_scores = translated.score_alias is not None
             # RETURN 0 suppresses document fields (like NOCONTENT);
             # with WITHSCORES the reply is [count, id, score, id, score, ...]
             no_content = self._has_return_0(translated.args)
@@ -342,7 +344,7 @@ class AsyncExecutor(_ScoreParseMixin):
         rows = []
 
         if translated.command == "FT.SEARCH":
-            with_scores = "WITHSCORES" in translated.args
+            with_scores = translated.score_alias is not None
             no_content = self._has_return_0(translated.args)
 
             score_alias: str | None = None
