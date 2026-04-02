@@ -218,7 +218,7 @@ SELECT * FROM products WHERE fulltext(title, 'laptop') OR fulltext(description, 
 - `=` on TEXT fields performs **exact phrase** matching (preserves stopwords)
 - `fulltext()` performs **tokenized** search (stopwords are filtered with a warning)
 - `fuzzy()` and `fulltext()` only work on TEXT fields — using them on TAG or NUMERIC raises `ValueError`
-- OR is case-insensitive: `'laptop OR tablet'`, `'laptop or tablet'`, and `'laptop Or tablet'` all work
+- OR must be **uppercase**: `'laptop OR tablet'` triggers union; lowercase `'laptop or tablet'` is treated as a regular three-word AND search
 - Special characters (`@`, `|`, `-`, `*`, `+`, etc.) in search terms are automatically escaped
 
 ### IS NULL / IS NOT NULL (ismissing)

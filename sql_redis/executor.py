@@ -122,14 +122,14 @@ class _ScoreParseMixin:
         first_row_fields: set[str] | None = None,
     ) -> str:
         """Determine a stable score column name that won't collide with
-        document fields.  The alias is decided once before iterating rows
-        so every row uses the same column name.
+        document fields.  The alias is resolved once and reused for every
+        row so all rows share the same column name.
 
         When a RETURN clause is present, the returned field names are used
         for collision detection.  When RETURN is absent (SELECT *), the
-        caller should pass ``first_row_fields`` — the field names from the
-        first result row — so we can detect collisions even when all
-        document attributes are returned."""
+        caller should pass ``first_row_fields`` — the union of all field
+        names across all result rows — so we can detect collisions even
+        when different documents have different field sets."""
         alias = score_alias or "__score"
         # Extract RETURN field names from args to detect collision
         try:
@@ -228,19 +228,23 @@ class Executor(_ScoreParseMixin):
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
                 # Stride of 3: key, score, field_list
-                # Resolve alias once from the first row so every row uses the
-                # same column name (consistent output schema).
-                resolved_alias: str | None = None
+                # First pass: collect all field names across all rows so the
+                # alias avoids collisions with any document field, not just
+                # the first row's fields.
+                all_field_names: set[str] = set()
+                parsed_rows: list[tuple[dict, Any]] = []
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    if resolved_alias is None:
-                        resolved_alias = self._resolve_score_alias(
-                            translated.score_alias,
-                            translated.args,
-                            first_row_fields=set(row.keys()),
-                        )
+                    all_field_names.update(row.keys())
+                    parsed_rows.append((row, score))
+                resolved_alias = self._resolve_score_alias(
+                    translated.score_alias,
+                    translated.args,
+                    first_row_fields=all_field_names,
+                )
+                for row, score in parsed_rows:
                     row[resolved_alias] = score
                     rows.append(row)
             else:
@@ -351,19 +355,22 @@ class AsyncExecutor(_ScoreParseMixin):
                     rows.append(row)
             elif with_scores:
                 # WITHSCORES format: [count, key1, score1, [fields1], ...]
-                # Resolve alias once from the first row so every row uses the
-                # same column name (consistent output schema).
-                resolved_alias: str | None = None
+                # First pass: collect all field names across all rows so the
+                # alias avoids collisions with any document field.
+                all_field_names: set[str] = set()
+                parsed_rows: list[tuple[dict, Any]] = []
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
                     row_data = raw_result[i + 2]
                     row = dict(zip(row_data[::2], row_data[1::2]))
-                    if resolved_alias is None:
-                        resolved_alias = self._resolve_score_alias(
-                            translated.score_alias,
-                            translated.args,
-                            first_row_fields=set(row.keys()),
-                        )
+                    all_field_names.update(row.keys())
+                    parsed_rows.append((row, score))
+                resolved_alias = self._resolve_score_alias(
+                    translated.score_alias,
+                    translated.args,
+                    first_row_fields=all_field_names,
+                )
+                for row, score in parsed_rows:
                     row[resolved_alias] = score
                     rows.append(row)
             else:

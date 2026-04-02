@@ -471,7 +471,12 @@ class SQLParser:
                             "score() argument must be a literal scorer name "
                             f"(e.g., 'BM25', 'TFIDF'), got {expression.expressions[0]}."
                         )
-                    scorer = str(scorer_val)
+                    if not isinstance(scorer_val, str):
+                        raise ValueError(
+                            "score() argument must be a string scorer name "
+                            f"(e.g., 'BM25', 'TFIDF'), got {scorer_val!r}."
+                        )
+                    scorer = scorer_val
                 if result.scoring is not None:
                     raise ValueError(
                         "Only one score() expression is allowed per query."
@@ -1003,11 +1008,21 @@ class SQLParser:
         if func_name == "FULLTEXT" and len(args) >= 2:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
             value = self._extract_literal_value(args[1])
+            if value is None and not isinstance(args[1], exp.Placeholder):
+                raise ValueError(
+                    "fulltext() second argument must be a literal string, "
+                    f"got {args[1]}. Usage: fulltext(field, 'search terms')"
+                )
 
             # Optional 3rd arg: slop (non-negative int)
             slop = None
             if len(args) >= 3:
                 slop_val = self._extract_literal_value(args[2])
+                if slop_val is None and not isinstance(args[2], exp.Placeholder):
+                    raise ValueError(
+                        "fulltext() slop argument must be a literal integer, "
+                        f"got {args[2]}."
+                    )
                 if slop_val is not None:
                     # Reject booleans and non-integer floats — only real
                     # integers are valid for slop.
@@ -1029,6 +1044,11 @@ class SQLParser:
             inorder = False
             if len(args) >= 4:
                 inorder_val = self._extract_literal_value(args[3])
+                if inorder_val is None and not isinstance(args[3], exp.Placeholder):
+                    raise ValueError(
+                        "fulltext() inorder argument must be a literal boolean "
+                        f"(true/false or 1/0), got {args[3]}."
+                    )
                 if inorder_val is not None:
                     if isinstance(inorder_val, bool):
                         inorder = inorder_val
@@ -1059,11 +1079,21 @@ class SQLParser:
         elif func_name == "FUZZY" and len(args) >= 2:
             field_name = args[0].name if isinstance(args[0], exp.Column) else None
             value = self._extract_literal_value(args[1])
+            if value is None and not isinstance(args[1], exp.Placeholder):
+                raise ValueError(
+                    "fuzzy() second argument must be a literal string, "
+                    f"got {args[1]}. Usage: fuzzy(field, 'search term')"
+                )
 
             # Optional 3rd arg: fuzzy level (1, 2, or 3)
             fuzzy_level = None
             if len(args) >= 3:
                 level_val = self._extract_literal_value(args[2])
+                if level_val is None and not isinstance(args[2], exp.Placeholder):
+                    raise ValueError(
+                        "fuzzy() level argument must be a literal integer, "
+                        f"got {args[2]}."
+                    )
                 if level_val is not None:
                     if isinstance(level_val, bool):
                         raise ValueError(
