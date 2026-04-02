@@ -324,7 +324,7 @@ class TestQueryBuilderFullQuery:
         """Build simple text search query."""
         builder = QueryBuilder()
         result = builder.build_query_string(
-            text_conditions=[("title", "MATCH", "laptop")],
+            text_conditions=[("title", "FULLTEXT", "laptop")],
             field_types={"title": "TEXT"},
         )
 
@@ -334,7 +334,7 @@ class TestQueryBuilderFullQuery:
         """Build combined text + numeric + tag query."""
         builder = QueryBuilder()
         result = builder.build_query_string(
-            text_conditions=[("title", "MATCH", "laptop")],
+            text_conditions=[("title", "FULLTEXT", "laptop")],
             numeric_conditions=[("price", "<", 1000)],
             tag_conditions=[("category", "=", "electronics")],
             field_types={"title": "TEXT", "price": "NUMERIC", "category": "TAG"},

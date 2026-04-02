@@ -1074,6 +1074,11 @@ class SQLParser:
                             f"FUZZY level argument must be an integer (got {level_val})"
                         )
                     fuzzy_level = int(level_val)
+                    if fuzzy_level not in (1, 2, 3):
+                        raise ValueError(
+                            f"FUZZY level must be 1, 2, or 3 (got {fuzzy_level}). "
+                            "RediSearch supports a maximum Levenshtein distance of 3."
+                        )
 
             if field_name is None:
                 raise ValueError(

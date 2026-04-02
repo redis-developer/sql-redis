@@ -180,7 +180,7 @@ class QueryBuilder:
                         or_parts.append(self._escape_fulltext_term(token))
             search_value = f"({'|'.join(or_parts)})"
         elif " " in value:
-            # FULLTEXT/MATCH with multi-word: tokenized search with stopword filtering.
+            # FULLTEXT with multi-word: tokenized search with stopword filtering.
             # Each term is escaped to prevent accidental operator injection, but a
             # leading ~ (optional-term modifier) is preserved as an intentional
             # RediSearch operator.
