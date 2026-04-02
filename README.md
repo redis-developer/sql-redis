@@ -172,28 +172,29 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 
 Full-text search on TEXT fields with multiple search modes:
 
-| Feature | SQL Syntax | RediSearch Output |
-|---------|-----------|-------------------|
-| Exact phrase | `title = 'gaming laptop'` | `@title:"gaming laptop"` |
-| Tokenized search | `fulltext(title, 'gaming laptop')` | `@title:(gaming laptop)` |
-| Fuzzy LD=1 | `fuzzy(title, 'laptap')` | `@title:%laptap%` |
-| Fuzzy LD=2 | `fuzzy(title, 'laptap', 2)` | `@title:%%laptap%%` |
-| Fuzzy LD=3 | `fuzzy(title, 'laptap', 3)` | `@title:%%%laptap%%%` |
-| OR / union | `fulltext(title, 'laptop OR tablet')` | `@title:(laptop\|tablet)` |
-| Prefix | `title LIKE 'lap%'` | `@title:lap*` |
-| Suffix | `title LIKE '%top'` | `@title:*top` |
-| Contains | `title LIKE '%apt%'` | `@title:*apt*` |
-| Proximity (slop) | `fulltext(title, 'gaming laptop', 2)` | `@title:(gaming laptop) => { $slop: 2; }` |
-| Proximity + order | `fulltext(title, 'gaming laptop', 2, true)` | `@title:(gaming laptop) => { $slop: 2; $inorder: true; }` |
-| Optional term | `fulltext(title, 'laptop ~gaming')` | `@title:(laptop ~gaming)` |
-| BM25 score | `SELECT score() AS relevance FROM idx` | `FT.SEARCH ... WITHSCORES` |
-| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:refurbished` |
+| Feature | SQL Syntax | RediSearch Output | Notes |
+|---------|-----------|-------------------|-------|
+| Exact phrase | `title = 'gaming laptop'` | `@title:"gaming laptop"` | Stopwords stripped |
+| Tokenized search | `fulltext(title, 'gaming laptop')` | `@title:(gaming laptop)` | Stopwords stripped |
+| Fuzzy LD=1 | `fuzzy(title, 'laptap')` | `@title:%laptap%` | |
+| Fuzzy LD=2 | `fuzzy(title, 'laptap', 2)` | `@title:%%laptap%%` | |
+| Fuzzy LD=3 | `fuzzy(title, 'laptap', 3)` | `@title:%%%laptap%%%` | |
+| OR / union | `fulltext(title, 'laptop OR tablet')` | `@title:(laptop\|tablet)` | |
+| Prefix | `title LIKE 'lap%'` | `@title:lap*` | |
+| Suffix | `title LIKE '%top'` | `@title:*top` | |
+| Contains | `title LIKE '%apt%'` | `@title:*apt*` | |
+| Proximity (slop) | `fulltext(title, 'gaming laptop', 2)` | `@title:(gaming laptop) => { $slop: 2; }` | |
+| Proximity + order | `fulltext(title, 'gaming laptop', 2, true)` | `@title:(gaming laptop) => { $slop: 2; $inorder: true; }` | |
+| Optional term | `fulltext(title, 'laptop ~gaming')` | `@title:(laptop ~gaming)` | |
+| BM25 score | `SELECT score() AS relevance FROM idx` | `FT.SEARCH ... WITHSCORES` | |
+| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:refurbished` | |
 
 **Examples:**
 
 ```sql
--- Exact phrase match (stopwords preserved)
+-- Exact phrase match (stopwords like "of" are stripped automatically)
 SELECT * FROM products WHERE title = 'bank of america'
+-- Produces: @title:"bank america"
 
 -- Fuzzy search for typos (Levenshtein distance 2)
 SELECT * FROM products WHERE fuzzy(title, 'laptap', 2)
@@ -214,10 +215,23 @@ SELECT title, score() AS relevance FROM products WHERE fulltext(title, 'laptop')
 SELECT * FROM products WHERE fulltext(title, 'laptop') OR fulltext(description, 'laptop')
 ```
 
+**Stopword handling:**
+
+Both `=` (exact phrase) and `fulltext()` (tokenized search) automatically strip [Redis default stopwords](https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/stopwords/) before sending queries to RediSearch. This is necessary because RediSearch does not index stopwords, so including them in queries causes syntax errors or failed matches. A `UserWarning` is emitted when stopwords are removed.
+
+For example, `WHERE title = 'bank of america'` produces `@title:"bank america"` because "of" is a default stopword and is never stored in the inverted index. The stripped phrase still matches correctly because the indexer assigns consecutive token positions after dropping stopwords.
+
+To include stopwords in your queries, create your index with `STOPWORDS 0`:
+
+```
+FT.CREATE myindex ON HASH PREFIX 1 doc: STOPWORDS 0 SCHEMA title TEXT
+```
+
 **Notes:**
-- `=` on TEXT fields performs **exact phrase** matching (preserves stopwords)
-- `fulltext()` performs **tokenized** search (stopwords are filtered with a warning)
-- `fuzzy()` and `fulltext()` only work on TEXT fields — using them on TAG or NUMERIC raises `ValueError`
+- `=` on TEXT fields performs **exact phrase** matching (double-quoted)
+- `fulltext()` performs **tokenized** AND search (parenthesized)
+- Both operators strip stopwords and emit a warning when they do
+- `fuzzy()` and `fulltext()` only work on TEXT fields; using them on TAG or NUMERIC raises `ValueError`
 - OR must be **uppercase**: `'laptop OR tablet'` triggers union; lowercase `'laptop or tablet'` is treated as a regular three-word AND search
 - Special characters (`@`, `|`, `-`, `*`, `+`, etc.) in search terms are automatically escaped
 
