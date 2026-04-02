@@ -22,13 +22,31 @@ class TestQueryBuilderTextFields:
 
         assert result == '@title:"gaming laptop"'
 
-    def test_text_exact_phrase_preserves_stopwords(self):
-        """TEXT field with = preserves stopwords in exact phrase matching."""
+    def test_text_exact_phrase_strips_stopwords(self):
+        """TEXT field with = strips stopwords and warns (RediSearch doesn't index them)."""
         builder = QueryBuilder()
-        result = builder.build_text_condition("name", "=", "bank of america")
+        import warnings
 
-        # Stopwords like "of" must NOT be stripped for exact phrase matching
-        assert result == '@name:"bank of america"'
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = builder.build_text_condition("name", "=", "bank of america")
+
+        # "of" is a stopword — stripped so the phrase matches indexed positions
+        assert result == '@name:"bank america"'
+        assert len(w) == 1
+        assert "Stopwords ['of']" in str(w[0].message)
+
+    def test_text_exact_phrase_no_stopwords_no_warning(self):
+        """TEXT field with = on phrase without stopwords produces no warning."""
+        builder = QueryBuilder()
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = builder.build_text_condition("name", "=", "bank america")
+
+        assert result == '@name:"bank america"'
+        assert len(w) == 0
 
     def test_text_exact_phrase_escapes_quotes(self):
         """TEXT field with = escapes double quotes inside the value."""

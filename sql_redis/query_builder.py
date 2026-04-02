@@ -143,8 +143,37 @@ class QueryBuilder:
             pct = "%" * level
             search_value = f"{pct}{escaped}{pct}"
         elif operator in ("=", "!="):
-            # Exact phrase match — always wrap in quotes, preserve stopwords.
-            escaped = self._escape_text_value(value)
+            # Exact phrase match — wrap in double quotes.
+            # Strip default stopwords because RediSearch does not index them;
+            # keeping them in the quoted phrase causes a query-time error
+            # (e.g. "diagnosing and treating" fails on "and").
+            # Since the indexer assigns consecutive positions after dropping
+            # stopwords, the stripped phrase matches correctly.
+            words = value.split()
+            removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
+            filtered = [w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS]
+
+            if removed:
+                phrase_words = filtered if filtered else words
+                if filtered:
+                    sw_msg = f"Stopwords {removed} were removed from"
+                else:
+                    sw_msg = (
+                        f"All tokens in '{value}' are stopwords and may not "
+                        "be indexed in"
+                    )
+                warnings.warn(
+                    f"{sw_msg} exact phrase '{value}'. "
+                    "By default, Redis does not index stopwords. "
+                    "To include stopwords in your index, create it "
+                    "with STOPWORDS 0.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            else:
+                phrase_words = words
+
+            escaped = self._escape_text_value(" ".join(phrase_words))
             search_value = f'"{escaped}"'
         elif re.search(r"\s+OR\s+", value):
             # OR union within text field: split on uppercase-only OR with
@@ -200,8 +229,8 @@ class QueryBuilder:
                 warnings.warn(
                     f"{sw_action} text search '{value}'. "
                     "By default, Redis does not index stopwords. "
-                    "To include stopwords in your index, create it with STOPWORDS 0. "
-                    "Use = operator for exact phrase matching that preserves stopwords.",
+                    "To include stopwords in your index, create it "
+                    "with STOPWORDS 0.",
                     UserWarning,
                     stacklevel=2,
                 )
