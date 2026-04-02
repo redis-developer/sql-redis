@@ -137,7 +137,12 @@ class _ScoreParseMixin:
             count = int(args[idx + 1])
             return_fields = set(args[idx + 2 : idx + 2 + count])
         except (ValueError, IndexError):
-            return_fields = first_row_fields or set()
+            # Normalize bytes keys to str so collision detection works
+            # regardless of decode_responses setting.
+            raw = first_row_fields or set()
+            return_fields = {
+                k.decode() if isinstance(k, bytes) else k for k in raw
+            }
         while alias in return_fields:
             alias = f"__score_{alias}"
         return alias
