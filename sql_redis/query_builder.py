@@ -187,6 +187,7 @@ class QueryBuilder:
             # or "OR tablet") so that the empty-operand check below catches
             # these malformed inputs instead of silently dropping "OR".
             or_parts: list[str] = []
+            all_removed: list[str] = []
             for part in re.split(r"(?:^|\s+)OR(?:\s+|$)", value):
                 words = part.strip().split()
                 if not words:
@@ -194,9 +195,29 @@ class QueryBuilder:
                         "Empty operand in OR expression — each side of OR "
                         "must contain at least one search term."
                     )
-                if len(words) > 1:
+
+                # Filter stopwords from this operand (same logic as
+                # the multi-word FULLTEXT branch).
+                removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
+                filtered = [
+                    w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS
+                ]
+                if removed:
+                    all_removed.extend(removed)
+                # Use filtered list if any non-stopword tokens remain;
+                # otherwise fall back to original words so we don't
+                # silently produce an empty operand.
+                effective = filtered if filtered else words
+
+                if not effective:
+                    raise ValueError(
+                        "Empty operand in OR expression — each side of OR "
+                        "must contain at least one search term."
+                    )
+
+                if len(effective) > 1:
                     escaped_tokens = []
-                    for w in words:
+                    for w in effective:
                         if w.startswith("~"):
                             escaped_tokens.append(
                                 "~" + self._escape_fulltext_term(w[1:])
@@ -205,11 +226,21 @@ class QueryBuilder:
                             escaped_tokens.append(self._escape_fulltext_term(w))
                     or_parts.append(f"({' '.join(escaped_tokens)})")
                 else:
-                    token = words[0]
+                    token = effective[0]
                     if token.startswith("~"):
                         or_parts.append("~" + self._escape_fulltext_term(token[1:]))
                     else:
                         or_parts.append(self._escape_fulltext_term(token))
+
+            if all_removed:
+                warnings.warn(
+                    f"Stopwords {all_removed} were removed from OR "
+                    f"expression '{value}'. By default, Redis does not "
+                    "index stopwords. To include stopwords in your "
+                    "index, create it with STOPWORDS 0.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             search_value = f"({'|'.join(or_parts)})"
         elif " " in value:
             # FULLTEXT with multi-word: tokenized search with stopword filtering.

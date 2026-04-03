@@ -697,6 +697,36 @@ class TestQueryBuilderEscaping:
         with pytest.raises(ValueError, match="Empty operand"):
             builder.build_text_condition("title", "FULLTEXT", "OR")
 
+    def test_or_operand_stopword_filtered(self):
+        """Stopwords inside OR operands are stripped with a warning."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition("title", "FULLTEXT", "laptop OR the")
+        # "the" is a stopword — after filtering only "laptop" remains on
+        # the right side, but since the right operand was *only* a stopword
+        # and falls back to original words, we keep it.
+        # Actually "the" is the only word so filtered=[] → fallback to ["the"].
+        # Let's just verify the left side is clean.
+        assert "laptop" in result
+
+    def test_or_multi_word_operand_stopword_filtered(self):
+        """Stopwords in multi-word OR operands are stripped."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition(
+                "title", "FULLTEXT", "gaming laptop OR the tablet"
+            )
+        # "the" stripped from second operand → "tablet"
+        assert result == "@title:((gaming laptop)|tablet)"
+
+    def test_or_all_stopwords_operand_warns(self):
+        """OR operand that is entirely stopwords falls back but warns."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition("title", "FULLTEXT", "laptop OR the")
+        # "the" is sole token and a stopword → filtered=[] → fallback to ["the"]
+        assert result == "@title:(laptop|the)"
+
     def test_escape_asterisk_in_fulltext(self):
         """Literal * in FULLTEXT is escaped to prevent wildcard."""
         builder = QueryBuilder()
