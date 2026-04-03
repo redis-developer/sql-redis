@@ -280,6 +280,12 @@ class Translator:
                 low_val = self._convert_to_numeric(low)
                 high_val = self._convert_to_numeric(high)
                 numeric_value = (low_val, high_val)
+            elif isinstance(condition.value, bool):
+                raise ValueError(
+                    f"Boolean value {condition.value!r} is not valid in a "
+                    "numeric context. Use 1/0 instead of true/false for "
+                    "numeric fields."
+                )
             elif isinstance(condition.value, (int, float)):
                 numeric_value = condition.value
             else:
@@ -311,6 +317,11 @@ class Translator:
         Raises:
             ValueError: If conversion fails.
         """
+        if isinstance(value, bool):
+            raise ValueError(
+                f"Boolean value {value!r} is not valid in a numeric context. "
+                "Use 1/0 instead of true/false for numeric fields."
+            )
         if isinstance(value, (int, float)):
             return value
         if isinstance(value, str):

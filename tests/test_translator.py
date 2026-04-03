@@ -213,6 +213,13 @@ class TestTranslatorBooleanConditions:
 
         assert "|" in result.query_string  # OR uses pipe
 
+    def test_boolean_in_numeric_context_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """WHERE price = true should raise, not produce @price:[True True]."""
+        with pytest.raises(ValueError, match="Boolean value"):
+            translator.translate(f"SELECT * FROM {basic_index} WHERE price = true")
+
 
 class TestTranslatorAggregate:
     """Tests for FT.AGGREGATE translation."""

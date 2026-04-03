@@ -679,6 +679,24 @@ class TestQueryBuilderEscaping:
         )
         assert result == "@title:(laptop|tablet)"
 
+    def test_or_trailing_raises(self):
+        """Trailing OR with no operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "laptop OR")
+
+    def test_or_leading_raises(self):
+        """Leading OR with no operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "OR tablet")
+
+    def test_or_only_raises(self):
+        """Bare 'OR' with no operands raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "OR")
+
     def test_escape_asterisk_in_fulltext(self):
         """Literal * in FULLTEXT is escaped to prevent wildcard."""
         builder = QueryBuilder()

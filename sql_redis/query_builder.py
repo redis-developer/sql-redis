@@ -175,7 +175,7 @@ class QueryBuilder:
 
             escaped = self._escape_text_value(" ".join(phrase_words))
             search_value = f'"{escaped}"'
-        elif re.search(r"\s+OR\s+", value):
+        elif re.search(r"(?:^|\s+)OR(?:\s+|$)", value):
             # OR union within text field: split on uppercase-only OR with
             # flexible whitespace, escape each term, join with |.
             # Only uppercase OR is treated as a boolean operator; lowercase
@@ -183,8 +183,11 @@ class QueryBuilder:
             # stays as a multi-word AND search, not bank|america).
             # Multi-word operands (e.g. "gaming laptop OR tablet") are wrapped
             # in parentheses so each side is an atomic subexpression.
+            # The regex also matches leading/trailing OR (e.g. "laptop OR"
+            # or "OR tablet") so that the empty-operand check below catches
+            # these malformed inputs instead of silently dropping "OR".
             or_parts: list[str] = []
-            for part in re.split(r"\s+OR\s+", value):
+            for part in re.split(r"(?:^|\s+)OR(?:\s+|$)", value):
                 words = part.strip().split()
                 if not words:
                     raise ValueError(
