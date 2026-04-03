@@ -16,7 +16,12 @@ import pytest
 import redis
 import redis.asyncio as async_redis
 
-from sql_redis.executor import AsyncExecutor, Executor
+from sql_redis.executor import (
+    AsyncExecutor,
+    Executor,
+    create_async_executor,
+    create_executor,
+)
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
 # ---------------------------------------------------------------------------
@@ -320,6 +325,42 @@ class TestLazySchemaWithExecutor:
         assert result2.count == 1
         # Same dict object — was not re-fetched
         assert schema_after_first is schema_after_second
+
+
+class TestExecutorFactories:
+    """Factory helpers configure schema loading strategies correctly."""
+
+    def test_create_executor_defaults_to_lazy(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """Default factory behavior should not preload schemas."""
+        executor = create_executor(redis_client)
+
+        assert isinstance(executor, Executor)
+        assert executor._schema_registry._schemas == {}
+
+    def test_create_executor_load_all_preloads_schemas(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """load_all strategy preserves eager schema loading."""
+        executor = create_executor(redis_client, schema_cache_strategy="load_all")
+
+        assert set(executor._schema_registry._schemas) == set(caching_indexes)
+
+    def test_create_executor_reuses_registry(
+        self, redis_client: redis.Redis, caching_indexes: list[str]
+    ):
+        """Factories should preserve a caller-provided registry instance."""
+        registry = SchemaRegistry(redis_client)
+
+        executor = create_executor(
+            redis_client,
+            schema_registry=registry,
+            schema_cache_strategy="load_all",
+        )
+
+        assert executor._schema_registry is registry
+        assert set(registry._schemas) == set(caching_indexes)
 
 
 # ---------------------------------------------------------------------------
@@ -767,3 +808,48 @@ class TestAsyncLazySchemaWithExecutor:
         assert result2.count == 1
         # Same dict object — was not re-fetched
         assert schema_after_first is schema_after_second
+
+
+class TestAsyncExecutorFactories:
+    """Async factory helpers configure schema loading strategies correctly."""
+
+    async def test_create_async_executor_defaults_to_lazy(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Default async factory behavior should not preload schemas."""
+        executor = await create_async_executor(async_caching_client)
+
+        assert isinstance(executor, AsyncExecutor)
+        assert executor._schema_registry._schemas == {}
+
+    async def test_create_async_executor_load_all_preloads_schemas(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Async load_all strategy preserves eager schema loading."""
+        executor = await create_async_executor(
+            async_caching_client,
+            schema_cache_strategy="load_all",
+        )
+
+        assert set(executor._schema_registry._schemas) == set(async_caching_indexes)
+
+    async def test_create_async_executor_reuses_registry(
+        self,
+        async_caching_client: async_redis.Redis,
+        async_caching_indexes: list[str],
+    ):
+        """Async factories should preserve a caller-provided registry instance."""
+        registry = AsyncSchemaRegistry(async_caching_client)
+
+        executor = await create_async_executor(
+            async_caching_client,
+            schema_registry=registry,
+            schema_cache_strategy="load_all",
+        )
+
+        assert executor._schema_registry is registry
+        assert set(registry._schemas) == set(async_caching_indexes)
