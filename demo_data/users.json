@@ -1,0 +1,123 @@
+[
+  {
+    "user_id": "user_001",
+    "name": "John Smith",
+    "email": "john.smith@email.com",
+    "age": 32,
+    "job": "engineer",
+    "credit_score": "high",
+    "city": "San Francisco",
+    "office_location": "-122.4194,37.7749",
+    "signup_date": 1704067200,
+    "total_purchases": 1250.50
+  },
+  {
+    "user_id": "user_002",
+    "name": "Mary Johnson",
+    "email": "mary.j@email.com",
+    "age": 28,
+    "job": "doctor",
+    "credit_score": "high",
+    "city": "Los Angeles",
+    "office_location": "-118.2437,34.0522",
+    "signup_date": 1706745600,
+    "total_purchases": 890.25
+  },
+  {
+    "user_id": "user_003",
+    "name": "Robert Davis",
+    "email": "rdavis@email.com",
+    "age": 45,
+    "job": "manager",
+    "credit_score": "medium",
+    "city": "New York",
+    "office_location": "-74.0060,40.7128",
+    "signup_date": 1698796800,
+    "total_purchases": 2340.00
+  },
+  {
+    "user_id": "user_004",
+    "name": "Emily Chen",
+    "email": "emily.chen@email.com",
+    "age": 25,
+    "job": "designer",
+    "credit_score": "medium",
+    "city": "Seattle",
+    "office_location": "-122.3321,47.6062",
+    "signup_date": 1709251200,
+    "total_purchases": 567.80
+  },
+  {
+    "user_id": "user_005",
+    "name": "Michael Brown",
+    "email": "mbrown@email.com",
+    "age": 38,
+    "job": "engineer",
+    "credit_score": "high",
+    "city": "San Francisco",
+    "office_location": "-122.4194,37.7749",
+    "signup_date": 1701388800,
+    "total_purchases": 3450.99
+  },
+  {
+    "user_id": "user_006",
+    "name": "Sarah Wilson",
+    "email": "swilson@email.com",
+    "age": 52,
+    "job": "doctor",
+    "credit_score": "high",
+    "city": "Boston",
+    "office_location": "-71.0589,42.3601",
+    "signup_date": 1696118400,
+    "total_purchases": 1890.75
+  },
+  {
+    "user_id": "user_007",
+    "name": "David Lee",
+    "email": "dlee@email.com",
+    "age": 29,
+    "job": "developer",
+    "credit_score": "low",
+    "city": "Austin",
+    "office_location": "-97.7431,30.2672",
+    "signup_date": 1711929600,
+    "total_purchases": 345.20
+  },
+  {
+    "user_id": "user_008",
+    "name": "Jennifer Martinez",
+    "email": "jmartinez@email.com",
+    "age": 41,
+    "job": "analyst",
+    "credit_score": "medium",
+    "city": "Chicago",
+    "office_location": "-87.6298,41.8781",
+    "signup_date": 1693526400,
+    "total_purchases": 2100.00
+  },
+  {
+    "user_id": "user_009",
+    "name": "James Taylor",
+    "email": "jtaylor@email.com",
+    "age": 35,
+    "job": "engineer",
+    "credit_score": "high",
+    "city": "San Jose",
+    "office_location": "-121.8863,37.3382",
+    "signup_date": 1704067200,
+    "total_purchases": 1780.50
+  },
+  {
+    "user_id": "user_010",
+    "name": "Lisa Anderson",
+    "email": "landerson@email.com",
+    "age": 48,
+    "job": "manager",
+    "credit_score": "high",
+    "city": "Denver",
+    "office_location": "-104.9903,39.7392",
+    "signup_date": 1698796800,
+    "total_purchases": 4200.00
+  }
+]
+

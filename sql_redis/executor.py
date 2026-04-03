@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import redis
 
@@ -13,6 +13,18 @@ from sql_redis.translator import Translator
 
 if TYPE_CHECKING:
     import redis.asyncio as async_redis
+
+
+SchemaCacheStrategy = Literal["lazy", "load_all"]
+
+
+def _validate_schema_cache_strategy(
+    schema_cache_strategy: str,
+) -> SchemaCacheStrategy:
+    """Validate and normalize the schema cache strategy."""
+    if schema_cache_strategy not in {"lazy", "load_all"}:
+        raise ValueError("schema_cache_strategy must be one of: 'lazy', 'load_all'")
+    return cast(SchemaCacheStrategy, schema_cache_strategy)
 
 
 def _substitute_params(sql: str, params: dict[str, Any]) -> str:
@@ -270,3 +282,51 @@ class AsyncExecutor:
                 rows.append(row)
 
         return QueryResult(rows=rows, count=count)
+
+
+def create_executor(
+    client: redis.Redis,
+    *,
+    schema_registry: SchemaRegistry | None = None,
+    schema_cache_strategy: SchemaCacheStrategy = "lazy",
+) -> Executor:
+    """Create a sync SQL executor with the requested schema cache strategy.
+
+    Args:
+        client: Redis client used by the executor.
+        schema_registry: Optional existing registry to reuse.
+        schema_cache_strategy: Schema loading strategy. ``"lazy"`` defers
+            ``FT.INFO`` calls until a referenced index is needed. ``"load_all"``
+            preserves the historical eager behavior by preloading all schemas.
+    """
+    schema_cache_strategy = _validate_schema_cache_strategy(schema_cache_strategy)
+
+    registry = schema_registry or SchemaRegistry(client)
+    if schema_cache_strategy == "load_all":
+        registry.load_all()
+
+    return Executor(client, registry)
+
+
+async def create_async_executor(
+    client: "async_redis.Redis",
+    *,
+    schema_registry: AsyncSchemaRegistry | None = None,
+    schema_cache_strategy: SchemaCacheStrategy = "lazy",
+) -> AsyncExecutor:
+    """Create an async SQL executor with the requested schema cache strategy.
+
+    Args:
+        client: Async Redis client used by the executor.
+        schema_registry: Optional existing async registry to reuse.
+        schema_cache_strategy: Schema loading strategy. ``"lazy"`` defers
+            ``FT.INFO`` calls until a referenced index is needed. ``"load_all"``
+            preserves the historical eager behavior by preloading all schemas.
+    """
+    schema_cache_strategy = _validate_schema_cache_strategy(schema_cache_strategy)
+
+    registry = schema_registry or AsyncSchemaRegistry(client)
+    if schema_cache_strategy == "load_all":
+        await registry.load_all()
+
+    return AsyncExecutor(client, registry)
