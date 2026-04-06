@@ -340,3 +340,135 @@ class TestPaginationWithOffset:
         if len(all_books.rows) > 1 and len(paginated.rows) >= 1:
             # Second item from all_books should be first in paginated result
             assert all_books.rows[1]["title"] == paginated.rows[0]["title"]
+
+
+class TestFuzzySearch:
+    """Integration tests for fuzzy text search with Levenshtein distance levels."""
+
+    def test_fuzzy_ld1_finds_misspelled(self, executor: Executor, products_data: str):
+        """fuzzy(field, 'laptap') at LD=1 should find 'laptop' titles."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fuzzy(title, 'laptap')"
+        )
+        assert len(result.rows) >= 1, "Fuzzy LD=1 should match 'laptop' from 'laptap'"
+        for row in result.rows:
+            assert "laptop" in row["title"].lower()
+
+    def test_fuzzy_ld2(self, executor: Executor, products_data: str):
+        """fuzzy(field, 'laptep', 2) at LD=2 should still find 'laptop'."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fuzzy(title, 'laptep', 2)"
+        )
+        assert len(result.rows) >= 1, "Fuzzy LD=2 should match 'laptop' from 'laptep'"
+
+    def test_fuzzy_ld3(self, executor: Executor, products_data: str):
+        """fuzzy(field, 'loptep', 3) at LD=3 should find 'laptop'."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fuzzy(title, 'loptep', 3)"
+        )
+        assert len(result.rows) >= 1, "Fuzzy LD=3 should match 'laptop' from 'loptep'"
+
+
+class TestSuffixInfixSearch:
+    """Integration tests for suffix and infix (contains) pattern matching."""
+
+    def test_prefix_search(self, executor: Executor, products_data: str):
+        """LIKE 'lap%' should find laptop titles (prefix match)."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE title LIKE 'lap%'"
+        )
+        assert len(result.rows) >= 1, "Prefix 'lap%' should match laptop titles"
+
+    def test_suffix_search(self, executor: Executor, products_data: str):
+        """LIKE '%board' should find keyboard titles (suffix match)."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE title LIKE '%board'"
+        )
+        # "Mechanical Keyboard" has 'board' at end of 'Keyboard'
+        assert len(result.rows) >= 1, "Suffix '%board' should match 'Keyboard'"
+
+    def test_infix_search(self, executor: Executor, products_data: str):
+        """LIKE '%ouse%' should find 'Wireless Mouse' (contains match)."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE title LIKE '%ouse%'"
+        )
+        assert len(result.rows) >= 1, "Infix '%ouse%' should match 'Mouse'"
+
+
+class TestORInTextSearch:
+    """Integration tests for OR/union within text field searches."""
+
+    def test_fulltext_or_two_terms(self, executor: Executor, products_data: str):
+        """fulltext(field, 'laptop OR keyboard') should find both."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fulltext(title, 'laptop OR keyboard')"
+        )
+        titles = [row["title"].lower() for row in result.rows]
+        has_laptop = any("laptop" in t for t in titles)
+        has_keyboard = any("keyboard" in t for t in titles)
+        assert (
+            has_laptop and has_keyboard
+        ), f"Should find both laptop and keyboard titles, got: {titles}"
+
+    def test_fulltext_or_three_terms(self, executor: Executor, products_data: str):
+        """fulltext(field, 'laptop OR mouse OR lamp') should find all three."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fulltext(title, 'laptop OR mouse OR lamp')"
+        )
+        assert (
+            len(result.rows) >= 3
+        ), f"Should find at least 3 products (laptop, mouse, lamp), got {len(result.rows)}"
+
+
+class TestProximitySearch:
+    """Integration tests for proximity search (slop + inorder)."""
+
+    def test_fulltext_with_slop(self, executor: Executor, products_data: str):
+        """fulltext(title, 'gaming pro', 2) should find 'Gaming laptop Pro'."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fulltext(title, 'gaming pro', 2)"
+        )
+        assert (
+            len(result.rows) >= 1
+        ), "Slop=2 should find 'Gaming laptop Pro' (1 word between gaming and pro)"
+
+    def test_fulltext_with_slop_and_inorder(
+        self, executor: Executor, products_data: str
+    ):
+        """fulltext(title, 'gaming pro', 2, true) with inorder should match."""
+        result = executor.execute(
+            f"SELECT title FROM {products_data} WHERE fulltext(title, 'gaming pro', 2, true)"
+        )
+        assert (
+            len(result.rows) >= 1
+        ), "Slop=2 with inorder should find 'Gaming laptop Pro'"
+
+
+class TestBM25Scoring:
+    """Integration tests for relevance scoring with WITHSCORES."""
+
+    def test_score_returns_relevance(self, executor: Executor, products_data: str):
+        """score() in SELECT should return relevance scores."""
+        result = executor.execute(
+            f"""SELECT title, score() AS relevance
+            FROM {products_data}
+            WHERE fulltext(title, 'laptop')"""
+        )
+        assert len(result.rows) >= 1, "Should return results with scores"
+        for row in result.rows:
+            assert "relevance" in row, f"Row should have 'relevance' key: {row}"
+            score = float(row["relevance"])
+            assert score >= 0, f"Score should be non-negative, got {score}"
+
+    def test_score_custom_scorer(self, executor: Executor, products_data: str):
+        """score('TFIDF') should use TFIDF scorer."""
+        result = executor.execute(
+            f"""SELECT title, score('TFIDF') AS relevance
+            FROM {products_data}
+            WHERE fulltext(title, 'laptop')"""
+        )
+        assert len(result.rows) >= 1, "Should return results with TFIDF scores"
+        for row in result.rows:
+            assert "relevance" in row
+            score = float(row["relevance"])
+            assert score >= 0

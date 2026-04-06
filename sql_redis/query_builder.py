@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 
 # Redis default stopwords - these are not indexed by default
@@ -51,40 +52,201 @@ class QueryBuilder:
     # Characters that need escaping in TAG values
     TAG_SPECIAL_CHARS = r".,<>{}[]\"':;!@#$%^&*()-+=~"
 
+    # Characters that have special meaning in RediSearch free-text queries
+    # (outside double-quoted phrases). Must be escaped with backslash.
+    # Includes double-quote to prevent starting/ending quoted phrases.
+    TEXT_QUERY_SPECIAL_CHARS = set('\\|-()"@~!{}[]^$><=;:*+')
+
+    @classmethod
+    def _escape_fulltext_term(cls, term: str) -> str:
+        """Escape characters that have special meaning in RediSearch free-text queries.
+
+        Applied to individual terms used outside of double-quoted phrases (e.g.,
+        in parenthesized FULLTEXT expressions, LIKE, FUZZY) so that user input
+        containing RediSearch operator characters does not alter query semantics
+        or produce syntax errors.
+        """
+        result = []
+        for char in term:
+            if char in cls.TEXT_QUERY_SPECIAL_CHARS:
+                result.append(f"\\{char}")
+            else:
+                result.append(char)
+        return "".join(result)
+
+    @staticmethod
+    def _escape_text_value(value: str) -> str:
+        """Escape characters that are special inside RediSearch double-quoted phrases.
+
+        Backslashes and double quotes must be escaped so they don't break
+        the query syntax or alter its meaning.
+        """
+        # Escape backslashes first (so we don't double-escape the quote escapes),
+        # then escape double quotes.
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
     def build_text_condition(
         self,
         field: str | list[str],
         operator: str,
         value: str,
         negated: bool = False,
+        *,
+        fuzzy_level: int | None = None,
+        slop: int | None = None,
+        inorder: bool = False,
     ) -> str:
         """Build query syntax for TEXT field conditions.
 
         Args:
             field: Field name or list of field names for multi-field search.
-            operator: One of =, MATCH, LIKE, FUZZY.
+            operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
+                - = / !=: exact phrase match, value wrapped in double quotes.
+                - FULLTEXT: tokenized keyword search with stopword filtering.
+                - LIKE: prefix/suffix/infix pattern (SQL % → RediSearch *).
+                - FUZZY: Levenshtein fuzzy match.
             value: The search term or pattern.
             negated: If True, prefix with - for negation.
+            fuzzy_level: Levenshtein distance for FUZZY (1, 2, or 3). Default 1.
+            slop: Maximum distance between terms for proximity search.
+            inorder: If True with slop, require terms in order.
 
         Returns:
-            RediSearch query syntax like @field:term or @field:"phrase".
+            RediSearch query syntax like @field:"exact phrase" or @field:(term1 term2).
         """
-        prefix = "-" if negated else ""
+        # Derive negation from both the flag and the operator itself,
+        # consistent with how build_tag_condition handles != via operator.
+        prefix = "-" if negated or operator == "!=" else ""
 
-        # Handle multi-field search
-        if isinstance(field, list):
-            field_str = "|".join(field)
-            return f"(@{field_str}:{value})"
-
-        # Handle different operators
+        # Build search_value based on operator — shared by single- and multi-field paths
         if operator == "LIKE":
-            # Convert SQL LIKE pattern (%) to RediSearch prefix (*)
-            search_value = value.replace("%", "*")
+            # Escape special chars in the non-wildcard portion, then convert % → *
+            # Split on %, escape each segment, rejoin with *
+            parts = value.split("%")
+            escaped_parts = [self._escape_fulltext_term(p) for p in parts]
+            search_value = "*".join(escaped_parts)
+            # If the non-wildcard portion contains spaces, wrap in parens
+            # so all tokens stay scoped to the field (e.g. '%gaming laptop%'
+            # → *gaming laptop* needs grouping to avoid token leaking).
+            non_wildcard = value.strip("%")
+            if " " in non_wildcard:
+                search_value = f"({search_value})"
         elif operator == "FUZZY":
-            # Wrap with % for fuzzy matching
-            search_value = f"%{value}%"
+            # Escape special chars before wrapping with % markers
+            escaped = self._escape_fulltext_term(value)
+            level = fuzzy_level if fuzzy_level is not None else 1
+            if level not in (1, 2, 3):
+                raise ValueError(
+                    f"Fuzzy level must be 1, 2, or 3 (got {level}). "
+                    "RediSearch supports a maximum Levenshtein distance of 3."
+                )
+            pct = "%" * level
+            search_value = f"{pct}{escaped}{pct}"
+        elif operator in ("=", "!="):
+            # Exact phrase match — wrap in double quotes.
+            # Strip default stopwords because RediSearch does not index them;
+            # keeping them in the quoted phrase causes a query-time error
+            # (e.g. "diagnosing and treating" fails on "and").
+            # Since the indexer assigns consecutive positions after dropping
+            # stopwords, the stripped phrase matches correctly.
+            words = value.split()
+            removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
+            filtered = [w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS]
+
+            if removed:
+                phrase_words = filtered if filtered else words
+                if filtered:
+                    sw_msg = f"Stopwords {removed} were removed from"
+                else:
+                    sw_msg = (
+                        f"All tokens in '{value}' are stopwords and may not "
+                        "be indexed in"
+                    )
+                warnings.warn(
+                    f"{sw_msg} exact phrase '{value}'. "
+                    "By default, Redis does not index stopwords. "
+                    "To include stopwords in your index, create it "
+                    "with STOPWORDS 0.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            else:
+                phrase_words = words
+
+            escaped = self._escape_text_value(" ".join(phrase_words))
+            search_value = f'"{escaped}"'
+        elif re.search(r"(?:^|\s+)OR(?:\s+|$)", value):
+            # OR union within text field: split on uppercase-only OR with
+            # flexible whitespace, escape each term, join with |.
+            # Only uppercase OR is treated as a boolean operator; lowercase
+            # "or" is treated as a regular search term (e.g. "bank or america"
+            # stays as a multi-word AND search, not bank|america).
+            # Multi-word operands (e.g. "gaming laptop OR tablet") are wrapped
+            # in parentheses so each side is an atomic subexpression.
+            # The regex also matches leading/trailing OR (e.g. "laptop OR"
+            # or "OR tablet") so that the empty-operand check below catches
+            # these malformed inputs instead of silently dropping "OR".
+            or_parts: list[str] = []
+            all_removed: list[str] = []
+            for part in re.split(r"(?:^|\s+)OR(?:\s+|$)", value):
+                words = part.strip().split()
+                if not words:
+                    raise ValueError(
+                        "Empty operand in OR expression — each side of OR "
+                        "must contain at least one search term."
+                    )
+
+                # Filter stopwords from this operand (same logic as
+                # the multi-word FULLTEXT branch).
+                removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
+                filtered = [
+                    w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS
+                ]
+                if removed:
+                    all_removed.extend(removed)
+                # Use filtered list if any non-stopword tokens remain;
+                # otherwise fall back to original words so we don't
+                # silently produce an empty operand.
+                effective = filtered if filtered else words
+
+                if not effective:
+                    raise ValueError(
+                        "Empty operand in OR expression — each side of OR "
+                        "must contain at least one search term."
+                    )
+
+                if len(effective) > 1:
+                    escaped_tokens = []
+                    for w in effective:
+                        if w.startswith("~"):
+                            escaped_tokens.append(
+                                "~" + self._escape_fulltext_term(w[1:])
+                            )
+                        else:
+                            escaped_tokens.append(self._escape_fulltext_term(w))
+                    or_parts.append(f"({' '.join(escaped_tokens)})")
+                else:
+                    token = effective[0]
+                    if token.startswith("~"):
+                        or_parts.append("~" + self._escape_fulltext_term(token[1:]))
+                    else:
+                        or_parts.append(self._escape_fulltext_term(token))
+
+            if all_removed:
+                warnings.warn(
+                    f"Stopwords {all_removed} were removed from OR "
+                    f"expression '{value}'. By default, Redis does not "
+                    "index stopwords. To include stopwords in your "
+                    "index, create it with STOPWORDS 0.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            search_value = f"({'|'.join(or_parts)})"
         elif " " in value:
-            # Phrase search - filter stopwords and wrap in quotes
+            # FULLTEXT with multi-word: tokenized search with stopword filtering.
+            # Each term is escaped to prevent accidental operator injection, but a
+            # leading ~ (optional-term modifier) is preserved as an intentional
+            # RediSearch operator.
             words = value.split()
             removed_stopwords = [
                 w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS
@@ -94,21 +256,54 @@ class QueryBuilder:
             ]
 
             if removed_stopwords:
+                if filtered_words:
+                    sw_action = f"Stopwords {removed_stopwords} were removed from"
+                else:
+                    sw_action = f"All tokens in '{value}' are stopwords and may not be indexed in"
                 warnings.warn(
-                    f"Stopwords {removed_stopwords} were removed from phrase search '{value}'. "
+                    f"{sw_action} text search '{value}'. "
                     "By default, Redis does not index stopwords. "
-                    "To include stopwords in your index, create it with STOPWORDS 0.",
+                    "To include stopwords in your index, create it "
+                    "with STOPWORDS 0.",
                     UserWarning,
                     stacklevel=2,
                 )
 
-            # Use filtered phrase, or original if all words were stopwords
-            phrase = " ".join(filtered_words) if filtered_words else value
-            search_value = f'"{phrase}"'
-        else:
-            search_value = value
+            escaped_words = []
+            for w in (filtered_words if filtered_words else words):
+                if w.startswith("~"):
+                    # Preserve ~ optional-term prefix, escape the rest
+                    escaped_words.append("~" + self._escape_fulltext_term(w[1:]))
+                else:
+                    escaped_words.append(self._escape_fulltext_term(w))
 
-        return f"{prefix}@{field}:{search_value}"
+            terms = " ".join(escaped_words)
+            search_value = f"({terms})"
+        else:
+            # Single-word FULLTEXT — escape to prevent accidental operator injection.
+            # Preserve ~ optional-term prefix (same as multi-word branch).
+            if value.startswith("~"):
+                search_value = "~" + self._escape_fulltext_term(value[1:])
+            else:
+                search_value = self._escape_fulltext_term(value)
+
+        # Handle multi-field search — use computed search_value with multi-field syntax
+        if isinstance(field, list):
+            field_str = "|".join(field)
+            base = f"{prefix}(@{field_str}:{search_value})"
+        else:
+            base = f"{prefix}@{field}:{search_value}"
+
+        # Append query attributes (slop, inorder) if specified
+        if slop is not None:
+            if not isinstance(slop, int) or isinstance(slop, bool) or slop < 0:
+                raise ValueError(f"slop must be a non-negative integer (got {slop!r})")
+            attrs = f"$slop: {slop};"
+            if inorder:
+                attrs += " $inorder: true;"
+            base = f"{base} => {{ {attrs} }}"
+
+        return base
 
     def _escape_tag_value(self, value: str) -> str:
         """Escape special characters in TAG values."""

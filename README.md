@@ -154,9 +154,11 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [x] Computed fields: `price * 0.9 AS discounted`
 - [x] Vector KNN search: `vector_distance(field, :param)`
 - [x] Hybrid search (filters + vector)
-- [x] Full-text search: `LIKE 'prefix%'` (prefix), `fulltext(field, 'terms')` function
+- [x] Full-text search: exact phrase, fuzzy, proximity, OR/union, LIKE patterns, BM25 scoring (see below)
 - [x] GEO field queries with full operator support (see below)
 - [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc. (see below)
+- [x] `IS NULL` / `IS NOT NULL` via `ismissing()` (requires Redis 7.4+, see below)
+- [x] `exists()` function for field presence checks (see below)
 
 ## What's Not Implemented (Yet...)
 
@@ -165,6 +167,112 @@ The layered approach emerged from TDD — writing tests first revealed natural b
 - [ ] HAVING clause
 - [ ] DISTINCT
 - [ ] Index creation from SQL (CREATE INDEX)
+
+### TEXT Search
+
+Full-text search on TEXT fields with multiple search modes:
+
+| Feature | SQL Syntax | RediSearch Output | Notes |
+|---------|-----------|-------------------|-------|
+| Exact phrase | `title = 'gaming laptop'` | `@title:"gaming laptop"` | Stopwords stripped |
+| Tokenized search | `fulltext(title, 'gaming laptop')` | `@title:(gaming laptop)` | Stopwords stripped |
+| Fuzzy LD=1 | `fuzzy(title, 'laptap')` | `@title:%laptap%` | |
+| Fuzzy LD=2 | `fuzzy(title, 'laptap', 2)` | `@title:%%laptap%%` | |
+| Fuzzy LD=3 | `fuzzy(title, 'laptap', 3)` | `@title:%%%laptap%%%` | |
+| OR / union | `fulltext(title, 'laptop OR tablet')` | `@title:(laptop\|tablet)` | |
+| Prefix | `title LIKE 'lap%'` | `@title:lap*` | |
+| Suffix | `title LIKE '%top'` | `@title:*top` | |
+| Contains | `title LIKE '%apt%'` | `@title:*apt*` | |
+| Proximity (slop) | `fulltext(title, 'gaming laptop', 2)` | `@title:(gaming laptop) => { $slop: 2; }` | |
+| Proximity + order | `fulltext(title, 'gaming laptop', 2, true)` | `@title:(gaming laptop) => { $slop: 2; $inorder: true; }` | |
+| Optional term | `fulltext(title, 'laptop ~gaming')` | `@title:(laptop ~gaming)` | |
+| BM25 score | `SELECT score() AS relevance FROM idx` | `FT.SEARCH ... WITHSCORES` | |
+| Negation | `NOT fulltext(title, 'refurbished')` | `-@title:refurbished` | |
+
+**Examples:**
+
+```sql
+-- Exact phrase match (stopwords like "of" are stripped automatically)
+SELECT * FROM products WHERE title = 'bank of america'
+-- Produces: @title:"bank america"
+
+-- Fuzzy search for typos (Levenshtein distance 2)
+SELECT * FROM products WHERE fuzzy(title, 'laptap', 2)
+
+-- OR search across terms
+SELECT * FROM products WHERE fulltext(title, 'laptop OR tablet OR phone')
+
+-- Proximity: terms within 3 words of each other, in order
+SELECT * FROM products WHERE fulltext(title, 'gaming laptop', 3, true)
+
+-- Suffix/contains pattern matching
+SELECT * FROM products WHERE title LIKE '%phone%'
+
+-- BM25 relevance scoring
+SELECT title, score() AS relevance FROM products WHERE fulltext(title, 'laptop')
+
+-- Multi-field search
+SELECT * FROM products WHERE fulltext(title, 'laptop') OR fulltext(description, 'laptop')
+```
+
+**Stopword handling:**
+
+Both `=` (exact phrase) and `fulltext()` (tokenized search) automatically strip [Redis default stopwords](https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/stopwords/) before sending queries to RediSearch. This is necessary because RediSearch does not index stopwords, so including them in queries causes syntax errors or failed matches. A `UserWarning` is emitted when stopwords are removed.
+
+For example, `WHERE title = 'bank of america'` produces `@title:"bank america"` because "of" is a default stopword and is never stored in the inverted index. The stripped phrase still matches correctly because the indexer assigns consecutive token positions after dropping stopwords.
+
+To include stopwords in your queries, create your index with `STOPWORDS 0`:
+
+```
+FT.CREATE myindex ON HASH PREFIX 1 doc: STOPWORDS 0 SCHEMA title TEXT
+```
+
+**Notes:**
+- `=` on TEXT fields performs **exact phrase** matching (double-quoted)
+- `fulltext()` performs **tokenized** AND search (parenthesized)
+- Both operators strip stopwords and emit a warning when they do
+- `fuzzy()` and `fulltext()` only work on TEXT fields; using them on TAG or NUMERIC raises `ValueError`
+- OR must be **uppercase**: `'laptop OR tablet'` triggers union; lowercase `'laptop or tablet'` is treated as a regular three-word AND search
+- Special characters (`@`, `|`, `-`, `*`, `+`, etc.) in search terms are automatically escaped
+
+### IS NULL / IS NOT NULL (ismissing)
+
+Check for missing (absent) fields using standard SQL `IS NULL` / `IS NOT NULL` syntax. Requires **Redis 7.4+** (RediSearch 2.10+) with `INDEXMISSING` declared on the field.
+
+| SQL | RediSearch Output |
+|-----|-------------------|
+| `WHERE email IS NULL` | `ismissing(@email)` |
+| `WHERE email IS NOT NULL` | `-ismissing(@email)` |
+
+```sql
+-- Find users without an email
+SELECT * FROM users WHERE email IS NULL
+
+-- Find users with an email
+SELECT * FROM users WHERE email IS NOT NULL
+
+-- Combine with other filters
+SELECT * FROM users WHERE category = 'eng' AND email IS NULL
+```
+
+**Note:** The field must be declared with `INDEXMISSING` in the index schema. A warning is emitted at translation time as a reminder.
+
+### exists() — Field Presence Check
+
+Check whether a field has a value using `exists()` in SELECT or HAVING. This uses `FT.AGGREGATE` with `APPLY exists(@field)`.
+
+```sql
+-- Check if fields exist (returns 1 or 0)
+SELECT name, exists(email) AS has_email FROM users
+
+-- Filter to only rows where a field exists
+SELECT name FROM users HAVING exists(email) = 1
+
+-- Combine with other computed fields
+SELECT name, exists(email) AS has_email, exists(phone) AS has_phone FROM users
+```
+
+**Note:** `exists()` is different from `IS NOT NULL` — it works via `FT.AGGREGATE APPLY` and doesn't require `INDEXMISSING` on the field, but returns `1`/`0` rather than filtering rows directly.
 
 ### DATE/DATETIME Handling
 

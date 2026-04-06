@@ -115,7 +115,50 @@ class QueryResult:
     count: int
 
 
-class Executor:
+class _ScoreParseMixin:
+    """Shared helpers for score-related response parsing."""
+
+    @staticmethod
+    def _has_return_0(args: list[str]) -> bool:
+        """Return True when the args contain 'RETURN 0' (no document fields)."""
+        try:
+            idx = args.index("RETURN")
+            return args[idx + 1] == "0"
+        except (ValueError, IndexError):
+            return False
+
+    @staticmethod
+    def _resolve_score_alias(
+        score_alias: str | None,
+        args: list[str],
+        first_row_fields: set[str] | None = None,
+    ) -> str:
+        """Determine a stable score column name that won't collide with
+        document fields.  The alias is resolved once and reused for every
+        row so all rows share the same column name.
+
+        When a RETURN clause is present, the returned field names are used
+        for collision detection.  When RETURN is absent (SELECT *), the
+        caller should pass ``first_row_fields`` — the union of all field
+        names across all result rows — so we can detect collisions even
+        when different documents have different field sets."""
+        alias = score_alias or "__score"
+        # Extract RETURN field names from args to detect collision
+        try:
+            idx = args.index("RETURN")
+            count = int(args[idx + 1])
+            return_fields = set(args[idx + 2 : idx + 2 + count])
+        except (ValueError, IndexError):
+            # Normalize bytes keys to str so collision detection works
+            # regardless of decode_responses setting.
+            raw = first_row_fields or set()
+            return_fields = {k.decode() if isinstance(k, bytes) else k for k in raw}
+        while alias in return_fields:
+            alias = f"__score_{alias}"
+        return alias
+
+
+class Executor(_ScoreParseMixin):
     """Executes SQL queries against Redis."""
 
     def __init__(self, client: redis.Redis, schema_registry: SchemaRegistry) -> None:
@@ -178,12 +221,55 @@ class Executor:
         rows = []
 
         if translated.command == "FT.SEARCH":
-            # FT.SEARCH format: [count, key1, [fields1], key2, [fields2], ...]
-            # Skip document keys (odd indices), take field lists (even indices after count)
-            for i in range(2, len(raw_result), 2):
-                row_data = raw_result[i]
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
+            # Use the explicit score_alias signal rather than scanning args
+            # for the literal token "WITHSCORES", which could false-positive
+            # if a returned field happened to be named "WITHSCORES".
+            with_scores = translated.score_alias is not None
+            # RETURN 0 suppresses document fields (like NOCONTENT);
+            # with WITHSCORES the reply is [count, id, score, id, score, ...]
+            no_content = self._has_return_0(translated.args)
+
+            # Pre-resolve score alias; may be deferred for SELECT *
+            score_alias: str | None = None
+
+            if with_scores and no_content:
+                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                # Stride of 2: key, score (no field array)
+                score_alias = self._resolve_score_alias(
+                    translated.score_alias, translated.args
+                )
+                for i in range(1, len(raw_result) - 1, 2):
+                    score = raw_result[i + 1]
+                    row = {score_alias: score}
+                    rows.append(row)
+            elif with_scores:
+                # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
+                # Stride of 3: key, score, field_list
+                # First pass: collect all field names across all rows so the
+                # alias avoids collisions with any document field, not just
+                # the first row's fields.
+                all_field_names: set[str] = set()
+                parsed_rows: list[tuple[dict, Any]] = []
+                for i in range(1, len(raw_result) - 2, 3):
+                    score = raw_result[i + 1]
+                    row_data = raw_result[i + 2]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    all_field_names.update(row.keys())
+                    parsed_rows.append((row, score))
+                resolved_alias = self._resolve_score_alias(
+                    translated.score_alias,
+                    translated.args,
+                    first_row_fields=all_field_names,
+                )
+                for row, score in parsed_rows:
+                    row[resolved_alias] = score
+                    rows.append(row)
+            else:
+                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
+                for i in range(2, len(raw_result), 2):
+                    row_data = raw_result[i]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:
@@ -193,7 +279,7 @@ class Executor:
         return QueryResult(rows=rows, count=count)
 
 
-class AsyncExecutor:
+class AsyncExecutor(_ScoreParseMixin):
     """Async version of Executor for use with redis.asyncio clients."""
 
     def __init__(
@@ -270,11 +356,46 @@ class AsyncExecutor:
         rows = []
 
         if translated.command == "FT.SEARCH":
-            # FT.SEARCH format: [count, key1, [fields1], key2, [fields2], ...]
-            for i in range(2, len(raw_result), 2):
-                row_data = raw_result[i]
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
+            with_scores = translated.score_alias is not None
+            no_content = self._has_return_0(translated.args)
+
+            score_alias: str | None = None
+
+            if with_scores and no_content:
+                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                score_alias = self._resolve_score_alias(
+                    translated.score_alias, translated.args
+                )
+                for i in range(1, len(raw_result) - 1, 2):
+                    score = raw_result[i + 1]
+                    row = {score_alias: score}
+                    rows.append(row)
+            elif with_scores:
+                # WITHSCORES format: [count, key1, score1, [fields1], ...]
+                # First pass: collect all field names across all rows so the
+                # alias avoids collisions with any document field.
+                all_field_names: set[str] = set()
+                parsed_rows: list[tuple[dict, Any]] = []
+                for i in range(1, len(raw_result) - 2, 3):
+                    score = raw_result[i + 1]
+                    row_data = raw_result[i + 2]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    all_field_names.update(row.keys())
+                    parsed_rows.append((row, score))
+                resolved_alias = self._resolve_score_alias(
+                    translated.score_alias,
+                    translated.args,
+                    first_row_fields=all_field_names,
+                )
+                for row, score in parsed_rows:
+                    row[resolved_alias] = score
+                    rows.append(row)
+            else:
+                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
+                for i in range(2, len(raw_result), 2):
+                    row_data = raw_result[i]
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:

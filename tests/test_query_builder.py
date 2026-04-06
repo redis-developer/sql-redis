@@ -8,26 +8,75 @@ from sql_redis.query_builder import QueryBuilder
 class TestQueryBuilderTextFields:
     """Tests for building TEXT field query syntax."""
 
-    def test_text_single_term(self):
-        """TEXT field with single term: @field:term."""
+    def test_text_single_term_exact(self):
+        """TEXT field with = wraps in quotes for exact phrase: @field:"term"."""
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "=", "laptop")
 
-        assert result == "@title:laptop"
+        assert result == '@title:"laptop"'
 
     def test_text_exact_phrase(self):
-        """TEXT field with phrase: @field:"exact phrase"."""
+        """TEXT field with = preserves multi-word phrase: @field:"exact phrase"."""
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "=", "gaming laptop")
 
         assert result == '@title:"gaming laptop"'
 
-    def test_text_match_term(self):
-        """TEXT field with MATCH: @field:term."""
+    def test_text_exact_phrase_strips_stopwords(self):
+        """TEXT field with = strips stopwords and warns (RediSearch doesn't index them)."""
         builder = QueryBuilder()
-        result = builder.build_text_condition("title", "MATCH", "laptop")
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = builder.build_text_condition("name", "=", "bank of america")
+
+        # "of" is a stopword — stripped so the phrase matches indexed positions
+        assert result == '@name:"bank america"'
+        assert len(w) == 1
+        assert "Stopwords ['of']" in str(w[0].message)
+
+    def test_text_exact_phrase_no_stopwords_no_warning(self):
+        """TEXT field with = on phrase without stopwords produces no warning."""
+        builder = QueryBuilder()
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = builder.build_text_condition("name", "=", "bank america")
+
+        assert result == '@name:"bank america"'
+        assert len(w) == 0
+
+    def test_text_exact_phrase_escapes_quotes(self):
+        """TEXT field with = escapes double quotes inside the value."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", 'say "hello"')
+
+        assert result == r'@title:"say \"hello\""'
+
+    def test_text_exact_phrase_escapes_backslashes(self):
+        """TEXT field with = escapes backslashes inside the value."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("path", "=", r"c:\users\docs")
+
+        assert result == r'@path:"c:\\users\\docs"'
+
+    def test_text_fulltext_term(self):
+        """TEXT field with FULLTEXT (tokenized search): @field:term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop")
 
         assert result == "@title:laptop"
+
+    def test_text_fulltext_multi_word(self):
+        """TEXT field with FULLTEXT and multi-word: @field:(term1 term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "description", "FULLTEXT", "gaming laptop"
+        )
+
+        assert result == "@description:(gaming laptop)"
 
     def test_text_prefix_search(self):
         """TEXT field with prefix: @field:prefix*."""
@@ -40,7 +89,7 @@ class TestQueryBuilderTextFields:
         """TEXT field with NOT: -@field:term."""
         builder = QueryBuilder()
         result = builder.build_text_condition(
-            "title", "MATCH", "refurbished", negated=True
+            "title", "FULLTEXT", "refurbished", negated=True
         )
 
         assert result == "-@title:refurbished"
@@ -52,11 +101,18 @@ class TestQueryBuilderTextFields:
 
         assert result == "@title:%laptap%"
 
+    def test_text_fulltext_special_chars_escaped(self):
+        """FULLTEXT term with RediSearch operator chars is escaped to avoid injection."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("description", "FULLTEXT", "anti-virus")
+
+        assert result == r"@description:anti\-virus"
+
     def test_text_multi_field(self):
         """TEXT multi-field search: (@field1|field2:term)."""
         builder = QueryBuilder()
         result = builder.build_text_condition(
-            ["title", "description"], "MATCH", "wireless"
+            ["title", "description"], "FULLTEXT", "wireless"
         )
 
         assert result == "(@title|description:wireless)"
@@ -286,7 +342,7 @@ class TestQueryBuilderFullQuery:
         """Build simple text search query."""
         builder = QueryBuilder()
         result = builder.build_query_string(
-            text_conditions=[("title", "MATCH", "laptop")],
+            text_conditions=[("title", "FULLTEXT", "laptop")],
             field_types={"title": "TEXT"},
         )
 
@@ -296,7 +352,7 @@ class TestQueryBuilderFullQuery:
         """Build combined text + numeric + tag query."""
         builder = QueryBuilder()
         result = builder.build_query_string(
-            text_conditions=[("title", "MATCH", "laptop")],
+            text_conditions=[("title", "FULLTEXT", "laptop")],
             numeric_conditions=[("price", "<", 1000)],
             tag_conditions=[("category", "=", "electronics")],
             field_types={"title": "TEXT", "price": "NUMERIC", "category": "TAG"},
@@ -314,6 +370,165 @@ class TestQueryBuilderFullQuery:
         assert result == "*"
 
 
+class TestQueryBuilderFuzzyLevels:
+    """Tests for fuzzy matching with Levenshtein distance levels 1-3."""
+
+    def test_fuzzy_ld1_default(self):
+        """Fuzzy LD=1 (default): @field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap")
+        assert result == "@title:%laptap%"
+
+    def test_fuzzy_ld1_explicit(self):
+        """Fuzzy LD=1 (explicit): @field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=1)
+        assert result == "@title:%laptap%"
+
+    def test_fuzzy_ld2(self):
+        """Fuzzy LD=2: @field:%%term%%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=2)
+        assert result == "@title:%%laptap%%"
+
+    def test_fuzzy_ld3(self):
+        """Fuzzy LD=3: @field:%%%term%%%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=3)
+        assert result == "@title:%%%laptap%%%"
+
+    def test_fuzzy_negated(self):
+        """Fuzzy with negation: -@field:%term%."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FUZZY", "laptap", negated=True, fuzzy_level=2
+        )
+        assert result == "-@title:%%laptap%%"
+
+    def test_fuzzy_invalid_level_raises(self):
+        """Fuzzy level outside 1-3 raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Fuzzy level must be 1, 2, or 3"):
+            builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=4)
+
+    def test_fuzzy_level_zero_raises(self):
+        """Fuzzy level 0 raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Fuzzy level must be 1, 2, or 3"):
+            builder.build_text_condition("title", "FUZZY", "laptap", fuzzy_level=0)
+
+
+class TestQueryBuilderSuffixInfix:
+    """Tests for suffix and infix (contains) matching."""
+
+    def test_suffix_match(self):
+        """LIKE '%term' -> suffix match: @field:*term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone")
+        assert result == "@title:*phone"
+
+    def test_infix_match(self):
+        """LIKE '%term%' -> infix/contains match: @field:*term*."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone%")
+        assert result == "@title:*phone*"
+
+    def test_prefix_match_still_works(self):
+        """LIKE 'term%' -> prefix match: @field:term* (unchanged)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "lap%")
+        assert result == "@title:lap*"
+
+    def test_suffix_negated(self):
+        """Suffix match with negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%phone", negated=True)
+        assert result == "-@title:*phone"
+
+    def test_infix_multiword_grouped(self):
+        """LIKE '%multi word%' groups tokens in parentheses."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%gaming laptop%")
+        assert result == "@title:(*gaming laptop*)"
+
+
+class TestQueryBuilderORInText:
+    """Tests for OR/union within text field searches."""
+
+    def test_fulltext_or_terms(self):
+        """FULLTEXT with OR: @field:(term1|term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop OR tablet")
+        assert result == "@title:(laptop|tablet)"
+
+    def test_fulltext_or_multiple_terms(self):
+        """FULLTEXT with multiple OR: @field:(t1|t2|t3)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR tablet OR phone"
+        )
+        assert result == "@title:(laptop|tablet|phone)"
+
+    def test_fulltext_or_negated(self):
+        """FULLTEXT OR with negation: -@field:(term1|term2)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR tablet", negated=True
+        )
+        assert result == "-@title:(laptop|tablet)"
+
+    def test_fulltext_and_still_works(self):
+        """FULLTEXT without OR: @field:(term1 term2) (AND semantics, unchanged)."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "gaming laptop")
+        assert result == "@title:(gaming laptop)"
+
+
+class TestQueryBuilderProximity:
+    """Tests for proximity search (slop and inorder)."""
+
+    def test_fulltext_with_slop(self):
+        """FULLTEXT with slop: @field:(term1 term2) => {$slop: N}."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", slop=2
+        )
+        assert result == "@title:(gaming laptop) => { $slop: 2; }"
+
+    def test_fulltext_with_slop_and_inorder(self):
+        """FULLTEXT with slop and inorder."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", slop=2, inorder=True
+        )
+        assert result == "@title:(gaming laptop) => { $slop: 2; $inorder: true; }"
+
+    def test_exact_phrase_with_slop(self):
+        """Exact phrase with slop appended."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", "gaming laptop", slop=1)
+        assert result == '@title:"gaming laptop" => { $slop: 1; }'
+
+    def test_slop_negated(self):
+        """Proximity with negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop", negated=True, slop=3
+        )
+        assert result == "-@title:(gaming laptop) => { $slop: 3; }"
+
+
+class TestQueryBuilderOptionalTerms:
+    """Tests for optional term (~) syntax."""
+
+    def test_fulltext_optional_term(self):
+        """FULLTEXT with optional terms using ~ prefix in value."""
+        builder = QueryBuilder()
+        # User writes: fulltext(field, 'required ~optional')
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop ~gaming")
+        assert result == "@title:(laptop ~gaming)"
+
+
 class TestQueryBuilderMissingCondition:
     """Tests for ismissing() query syntax."""
 
@@ -328,3 +543,256 @@ class TestQueryBuilderMissingCondition:
         builder = QueryBuilder()
         result = builder.build_missing_condition("email", is_missing=False)
         assert result == "-ismissing(@email)"
+
+
+class TestQueryBuilderEscaping:
+    """Tests for escaping special characters in text search values."""
+
+    def test_escape_fulltext_term_special_chars(self):
+        """_escape_fulltext_term escapes RediSearch operator characters."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term("hello|world")
+        assert result == "hello\\|world"
+
+    def test_escape_fulltext_term_double_quote(self):
+        """_escape_fulltext_term escapes double quotes."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term('say "hello"')
+        assert result == 'say \\"hello\\"'
+
+    def test_escape_fulltext_term_at_sign(self):
+        """_escape_fulltext_term escapes @ to prevent field injection."""
+        builder = QueryBuilder()
+        result = builder._escape_fulltext_term("user@email")
+        assert result == "user\\@email"
+
+    def test_like_escapes_special_chars(self):
+        """LIKE pattern escapes special chars in the non-wildcard portion."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "LIKE", "%hello|world%")
+        assert result == "@title:*hello\\|world*"
+
+    def test_fuzzy_escapes_special_chars(self):
+        """FUZZY escapes special chars in the term before wrapping with %."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", "hello@world")
+        assert result == "@title:%hello\\@world%"
+
+    def test_fuzzy_escapes_double_quote(self):
+        """FUZZY escapes double quotes in term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FUZZY", 'say"hi')
+        assert result == '@title:%say\\"hi%'
+
+    def test_multi_field_non_exact_escapes(self):
+        """Multi-field search with non-exact operator escapes special chars."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "hello|world"
+        )
+        assert result == "(@title|description:hello\\|world)"
+
+    def test_or_terms_escape_special_chars(self):
+        """OR operands are escaped before joining with |."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop OR anti-virus"
+        )
+        # '-' is a RediSearch operator and should be escaped in OR terms
+        assert result == "@title:(laptop|anti\\-virus)"
+
+    def test_or_terms_escape_at_sign(self):
+        """OR operands escape @ to prevent field injection."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello OR @world")
+        assert result == "@title:(hello|\\@world)"
+
+    def test_multiword_fulltext_escapes_special_chars(self):
+        """Multi-word FULLTEXT escapes dangerous chars like @ and |."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello @world")
+        assert result == "@title:(hello \\@world)"
+
+    def test_multiword_fulltext_preserves_optional_prefix(self):
+        """Multi-word FULLTEXT preserves ~ optional-term prefix."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop ~gaming")
+        assert result == "@title:(laptop ~gaming)"
+
+    def test_multiword_fulltext_escapes_dash(self):
+        """Multi-word FULLTEXT escapes - to prevent accidental negation."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello anti-virus")
+        assert result == "@title:(hello anti\\-virus)"
+
+    def test_multi_field_multiword_fulltext(self):
+        """Multi-field with multi-word FULLTEXT scopes all terms to fields."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "gaming laptop"
+        )
+        assert result == "(@title|description:(gaming laptop))"
+
+    def test_multi_field_or_fulltext(self):
+        """Multi-field with OR FULLTEXT uses pipe-separated terms."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FULLTEXT", "laptop OR tablet"
+        )
+        assert result == "(@title|description:(laptop|tablet))"
+
+    def test_multi_field_fuzzy(self):
+        """Multi-field with FUZZY wraps with % markers."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            ["title", "description"], "FUZZY", "laptap", fuzzy_level=2
+        )
+        assert result == "(@title|description:%%laptap%%)"
+
+    def test_lowercase_or_is_not_boolean(self):
+        """Lowercase 'or' is treated as a regular search term, not a boolean operator.
+
+        'bank or america' should NOT become bank|america — it should be a
+        multi-word AND-style search with stopword filtering applied to 'or'.
+        """
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop or tablet")
+        # "or" is a stopword; remaining terms are "laptop" and "tablet"
+        assert result == "@title:(laptop tablet)"
+
+    def test_mixed_case_or_is_not_boolean(self):
+        """Mixed case 'Or' / 'oR' is treated as a regular term, not boolean OR.
+
+        Only uppercase 'OR' triggers the union operator.
+        'Or' is a stopword (or → stopword list), so it gets removed.
+        """
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop Or tablet")
+        # "Or" lowercases to "or" which is a stopword; remaining: laptop tablet
+        assert result == "@title:(laptop tablet)"
+
+    def test_or_extra_whitespace(self):
+        """OR parsing tolerates extra whitespace."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "laptop  OR   tablet"
+        )
+        assert result == "@title:(laptop|tablet)"
+
+    def test_or_trailing_raises(self):
+        """Trailing OR with no operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "laptop OR")
+
+    def test_or_leading_raises(self):
+        """Leading OR with no operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "OR tablet")
+
+    def test_or_only_raises(self):
+        """Bare 'OR' with no operands raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand"):
+            builder.build_text_condition("title", "FULLTEXT", "OR")
+
+    def test_or_operand_stopword_filtered(self):
+        """Stopwords inside OR operands are stripped with a warning."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition("title", "FULLTEXT", "laptop OR the")
+        # "the" is a stopword — after filtering only "laptop" remains on
+        # the right side, but since the right operand was *only* a stopword
+        # and falls back to original words, we keep it.
+        # Actually "the" is the only word so filtered=[] → fallback to ["the"].
+        # Let's just verify the left side is clean.
+        assert "laptop" in result
+
+    def test_or_multi_word_operand_stopword_filtered(self):
+        """Stopwords in multi-word OR operands are stripped."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition(
+                "title", "FULLTEXT", "gaming laptop OR the tablet"
+            )
+        # "the" stripped from second operand → "tablet"
+        assert result == "@title:((gaming laptop)|tablet)"
+
+    def test_or_all_stopwords_operand_warns(self):
+        """OR operand that is entirely stopwords falls back but warns."""
+        builder = QueryBuilder()
+        with pytest.warns(UserWarning, match="Stopwords.*removed from OR"):
+            result = builder.build_text_condition("title", "FULLTEXT", "laptop OR the")
+        # "the" is sole token and a stopword → filtered=[] → fallback to ["the"]
+        assert result == "@title:(laptop|the)"
+
+    def test_escape_asterisk_in_fulltext(self):
+        """Literal * in FULLTEXT is escaped to prevent wildcard."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "hello*world")
+        assert result == r"@title:hello\*world"
+
+    def test_escape_plus_in_fulltext(self):
+        """Literal + in FULLTEXT is escaped to prevent mandatory-term."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "C++")
+        assert result == r"@title:C\+\+"
+
+    def test_single_term_optional_prefix_preserved(self):
+        """Single-term FULLTEXT with ~ prefix preserves optional semantics."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "~gaming")
+        assert result == "@title:~gaming"
+
+    def test_or_multiword_operand_grouped(self):
+        """OR with multi-word operand wraps it in parentheses."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop OR tablet"
+        )
+        assert result == "@title:((gaming laptop)|tablet)"
+
+    def test_or_both_multiword_operands_grouped(self):
+        """OR with multi-word operands on both sides wraps each."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition(
+            "title", "FULLTEXT", "gaming laptop OR android tablet"
+        )
+        assert result == "@title:((gaming laptop)|(android tablet))"
+
+    def test_or_trailing_empty_operand_raises(self):
+        """Trailing OR with empty operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand in OR expression"):
+            builder.build_text_condition("title", "FULLTEXT", "laptop OR ")
+
+    def test_or_leading_empty_operand_raises(self):
+        """Leading OR with empty operand raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="Empty operand in OR expression"):
+            builder.build_text_condition("title", "FULLTEXT", " OR tablet")
+
+    def test_or_preserves_optional_prefix(self):
+        """OR operand with ~ prefix preserves optional-term semantics."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "FULLTEXT", "laptop OR ~gaming")
+        assert result == "@title:(laptop|~gaming)"
+
+
+class TestQueryBuilderSlopValidation:
+    """Tests for slop validation at the QueryBuilder level."""
+
+    def test_slop_negative_raises(self):
+        """Negative slop raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            builder.build_text_condition("title", "FULLTEXT", "gaming laptop", slop=-1)
+
+    def test_slop_boolean_raises(self):
+        """Boolean slop raises ValueError."""
+        builder = QueryBuilder()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            builder.build_text_condition(
+                "title", "FULLTEXT", "gaming laptop", slop=True
+            )

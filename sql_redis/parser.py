@@ -164,6 +164,9 @@ class Condition:
     operator: str
     value: object
     negated: bool = False
+    fuzzy_level: int | None = None  # Levenshtein distance for FUZZY (1, 2, or 3)
+    slop: int | None = None  # Max distance between terms for proximity search
+    inorder: bool = False  # Require terms in order (used with slop)
 
 
 @dataclass
@@ -197,6 +200,17 @@ class GeoDistanceSelect:
 
 
 @dataclass
+class ScoringSpec:
+    """Specification for relevance scoring.
+
+    Triggers WITHSCORES and optional SCORER on FT.SEARCH.
+    """
+
+    alias: str = "score"  # Column alias for the score
+    scorer: str = "BM25"  # Scorer algorithm (BM25, TFIDF, DISMAX, etc.)
+
+
+@dataclass
 class ParsedQuery:
     """Result of parsing a SQL query."""
 
@@ -219,6 +233,7 @@ class ParsedQuery:
     limit: int | None = None
     offset: int | None = None
     filters: list[str] = dataclasses.field(default_factory=list)
+    scoring: ScoringSpec | None = None  # Relevance scoring config
 
 
 class SQLParser:
@@ -441,6 +456,41 @@ class SQLParser:
             elif func_name_lower == "geo_distance":
                 # geo_distance(field, POINT(lon, lat), unit) in SELECT
                 self._process_geo_distance_select(expression, result, alias)
+            elif func_name_lower == "score":
+                # score() or score('BM25') — triggers WITHSCORES + SCORER
+                scorer = "BM25"
+                if len(expression.expressions) > 1:
+                    raise ValueError(
+                        f"score() expects at most one argument, "
+                        f"got {len(expression.expressions)}."
+                    )
+                if expression.expressions:
+                    scorer_val = self._extract_literal_value(expression.expressions[0])
+                    if scorer_val is None:
+                        raise ValueError(
+                            "score() argument must be a literal scorer name "
+                            f"(e.g., 'BM25', 'TFIDF'), got {expression.expressions[0]}."
+                        )
+                    if not isinstance(scorer_val, str):
+                        raise ValueError(
+                            "score() argument must be a string scorer name "
+                            f"(e.g., 'BM25', 'TFIDF'), got {scorer_val!r}."
+                        )
+                    if not scorer_val:
+                        raise ValueError(
+                            "score() scorer name must not be empty. "
+                            "Use score() with no arguments for the default "
+                            "BM25 scorer, or pass a valid name like 'TFIDF'."
+                        )
+                    scorer = scorer_val
+                if result.scoring is not None:
+                    raise ValueError(
+                        "Only one score() expression is allowed per query."
+                    )
+                result.scoring = ScoringSpec(
+                    alias=alias or "score",
+                    scorer=scorer,
+                )
             elif func_name_lower in redis_reducers:
                 # Redis-specific reducer functions
                 field_name = None
@@ -656,6 +706,9 @@ class SQLParser:
             self._add_between_condition(expression, result, negated)
         elif isinstance(expression, exp.In):
             self._add_in_condition(expression, result, negated)
+        elif isinstance(expression, exp.Like):
+            # LIKE 'pattern%' / '%pattern' / '%pattern%'
+            self._add_condition(expression, "LIKE", result, negated)
         elif isinstance(expression, exp.And):
             result.boolean_operator = "AND"
             self._process_where_clause(expression.this, result, negated)
@@ -938,27 +991,145 @@ class SQLParser:
     def _add_function_condition(
         self, expression, result: ParsedQuery, negated: bool
     ) -> None:
-        """Add a condition from a function call like fulltext(field, value)."""
+        """Add a condition from a function call like fulltext(field, value) or fuzzy(field, value, level)."""
         func_name = expression.name.upper()
-        if func_name == "FULLTEXT" and len(expression.expressions) >= 2:
-            first_arg = expression.expressions[0]
-            second_arg = expression.expressions[1]
+        args = expression.expressions
 
-            field_name = None
-            if isinstance(first_arg, exp.Column):
-                field_name = first_arg.name
+        if func_name in ("FULLTEXT", "FUZZY") and len(args) < 2:
+            raise ValueError(
+                f"{func_name.lower()}() requires at least 2 arguments: "
+                f"{func_name.lower()}(field, value), got {len(args)}."
+            )
 
-            value = self._extract_literal_value(second_arg)
+        # Validate max argument counts to catch typos / misuse early.
+        # fulltext(field, value [, slop [, inorder]]) → max 4
+        # fuzzy(field, value [, level])               → max 3
+        _max_args = {"FULLTEXT": 4, "FUZZY": 3}
+        if func_name in _max_args and len(args) > _max_args[func_name]:
+            raise ValueError(
+                f"{func_name.lower()}() accepts at most {_max_args[func_name]} "
+                f"arguments, got {len(args)}."
+            )
 
-            if field_name is not None:
-                result.conditions.append(
-                    Condition(
-                        field=field_name,
-                        operator="FULLTEXT",
-                        value=value,
-                        negated=negated,
-                    )
+        if func_name == "FULLTEXT" and len(args) >= 2:
+            field_name = args[0].name if isinstance(args[0], exp.Column) else None
+            value = self._extract_literal_value(args[1])
+            if value is None and not isinstance(args[1], exp.Placeholder):
+                raise ValueError(
+                    "fulltext() second argument must be a literal string, "
+                    f"got {args[1]}. Usage: fulltext(field, 'search terms')"
                 )
+
+            # Optional 3rd arg: slop (non-negative int)
+            slop = None
+            if len(args) >= 3:
+                slop_val = self._extract_literal_value(args[2])
+                if slop_val is None and not isinstance(args[2], exp.Placeholder):
+                    raise ValueError(
+                        "fulltext() slop argument must be a literal integer, "
+                        f"got {args[2]}."
+                    )
+                if slop_val is not None:
+                    # Reject booleans and non-integer floats — only real
+                    # integers are valid for slop.
+                    if isinstance(slop_val, bool):
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be an integer (got {slop_val})"
+                        )
+                    if isinstance(slop_val, float) and slop_val != int(slop_val):
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be an integer (got {slop_val})"
+                        )
+                    slop = int(slop_val)
+                    if slop < 0:
+                        raise ValueError(
+                            f"FULLTEXT slop argument must be a non-negative integer (got {slop})"
+                        )
+
+            # Optional 4th arg: inorder (boolean-like: true/false or 1/0)
+            inorder = False
+            if len(args) >= 4:
+                inorder_val = self._extract_literal_value(args[3])
+                if inorder_val is None and not isinstance(args[3], exp.Placeholder):
+                    raise ValueError(
+                        "fulltext() inorder argument must be a literal boolean "
+                        f"(true/false or 1/0), got {args[3]}."
+                    )
+                if inorder_val is not None:
+                    if isinstance(inorder_val, bool):
+                        inorder = inorder_val
+                    elif str(inorder_val).lower() in ("1", "0", "true", "false"):
+                        inorder = str(inorder_val).lower() in ("1", "true")
+                    else:
+                        raise ValueError(
+                            f"FULLTEXT inorder argument must be a boolean "
+                            f"(true/false or 1/0), got {inorder_val!r}"
+                        )
+
+            if field_name is None:
+                raise ValueError(
+                    "fulltext() first argument must be a column name, "
+                    f"got {args[0]}. Usage: fulltext(field, 'search terms')"
+                )
+            result.conditions.append(
+                Condition(
+                    field=field_name,
+                    operator="FULLTEXT",
+                    value=value,
+                    negated=negated,
+                    slop=slop,
+                    inorder=inorder,
+                )
+            )
+
+        elif func_name == "FUZZY" and len(args) >= 2:
+            field_name = args[0].name if isinstance(args[0], exp.Column) else None
+            value = self._extract_literal_value(args[1])
+            if value is None and not isinstance(args[1], exp.Placeholder):
+                raise ValueError(
+                    "fuzzy() second argument must be a literal string, "
+                    f"got {args[1]}. Usage: fuzzy(field, 'search term')"
+                )
+
+            # Optional 3rd arg: fuzzy level (1, 2, or 3)
+            fuzzy_level = None
+            if len(args) >= 3:
+                level_val = self._extract_literal_value(args[2])
+                if level_val is None and not isinstance(args[2], exp.Placeholder):
+                    raise ValueError(
+                        "fuzzy() level argument must be a literal integer, "
+                        f"got {args[2]}."
+                    )
+                if level_val is not None:
+                    if isinstance(level_val, bool):
+                        raise ValueError(
+                            f"FUZZY level argument must be an integer (got {level_val})"
+                        )
+                    if isinstance(level_val, float) and level_val != int(level_val):
+                        raise ValueError(
+                            f"FUZZY level argument must be an integer (got {level_val})"
+                        )
+                    fuzzy_level = int(level_val)
+                    if fuzzy_level not in (1, 2, 3):
+                        raise ValueError(
+                            f"FUZZY level must be 1, 2, or 3 (got {fuzzy_level}). "
+                            "RediSearch supports a maximum Levenshtein distance of 3."
+                        )
+
+            if field_name is None:
+                raise ValueError(
+                    "fuzzy() first argument must be a column name, "
+                    f"got {args[0]}. Usage: fuzzy(field, 'search term')"
+                )
+            result.conditions.append(
+                Condition(
+                    field=field_name,
+                    operator="FUZZY",
+                    value=value,
+                    negated=negated,
+                    fuzzy_level=fuzzy_level,
+                )
+            )
 
     def _extract_literal_value(self, expression, convert_dates: bool = False):
         """Extract a Python value from a sqlglot Literal or Neg expression.
@@ -983,6 +1154,9 @@ class SQLParser:
                 if timestamp is not None:
                     return timestamp
             return value
+        elif isinstance(expression, exp.Boolean):
+            # Handle TRUE/FALSE keywords parsed by sqlglot
+            return expression.this
         elif isinstance(expression, exp.Neg):
             # Handle negative numbers: Neg(Literal(122.4)) -> -122.4
             inner_value = self._extract_literal_value(expression.this)

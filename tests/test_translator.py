@@ -136,7 +136,7 @@ class TestTranslatorBasicSearch:
         )
 
         assert result.command == "FT.SEARCH"
-        assert result.query_string == "@title:hello"
+        assert result.query_string == '@title:"hello"'
 
     def test_select_with_numeric_filter(self, translator: Translator, basic_index: str):
         """SELECT with NUMERIC field condition."""
@@ -202,7 +202,7 @@ class TestTranslatorBooleanConditions:
             f"SELECT * FROM {basic_index} WHERE title = 'hello' AND price > 50"
         )
 
-        assert "@title:hello" in result.query_string
+        assert '@title:"hello"' in result.query_string
         assert "@price:[(50 +inf]" in result.query_string
 
     def test_or_conditions(self, translator: Translator, basic_index: str):
@@ -212,6 +212,13 @@ class TestTranslatorBooleanConditions:
         )
 
         assert "|" in result.query_string  # OR uses pipe
+
+    def test_boolean_in_numeric_context_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """WHERE price = true should raise, not produce @price:[True True]."""
+        with pytest.raises(ValueError, match="Boolean value"):
+            translator.translate(f"SELECT * FROM {basic_index} WHERE price = true")
 
 
 class TestTranslatorAggregate:
@@ -416,6 +423,14 @@ class TestTranslatorNegation:
 
         assert "-@title" in result.query_string
 
+    def test_double_negation_cancels(self, translator: Translator, basic_index: str):
+        """NOT (field != x) double negation resolves to positive match."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE NOT title != 'good'"
+        )
+
+        assert result.query_string == '@title:"good"'
+
 
 class TestTranslatorOutput:
     """Tests for output format methods."""
@@ -616,3 +631,250 @@ class TestTranslatorExists:
         assert "LOAD" in result.args
         load_idx = result.args.index("LOAD")
         assert result.args[load_idx + 1] == "*"
+
+
+class TestTranslatorFuzzyLevels:
+    """Tests for FUZZY with Levenshtein distance levels.
+
+    Inspired by PostgreSQL's pg_trgm similarity threshold levels,
+    maps to RediSearch's %, %%, %%% fuzzy syntax.
+    """
+
+    def test_fuzzy_ld1_default(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term') with no level → LD=1 (%term%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap')"
+        )
+        assert result.command == "FT.SEARCH"
+        assert "@title:%laptap%" in result.query_string
+
+    def test_fuzzy_ld2(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term', 2) → LD=2 (%%term%%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap', 2)"
+        )
+        assert "@title:%%laptap%%" in result.query_string
+
+    def test_fuzzy_ld3(self, translator: Translator, basic_index: str):
+        """fuzzy(field, 'term', 3) → LD=3 (%%%term%%%)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fuzzy(title, 'laptap', 3)"
+        )
+        assert "@title:%%%laptap%%%" in result.query_string
+
+    def test_fuzzy_on_tag_field_raises(self, translator: Translator, basic_index: str):
+        """fuzzy() on a TAG field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE fuzzy(category, 'laptap')"
+            )
+
+    def test_fulltext_on_numeric_field_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """fulltext() on a NUMERIC field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE fulltext(price, 'laptop')"
+            )
+
+    def test_like_on_tag_field_raises(self, translator: Translator, basic_index: str):
+        """LIKE on a TAG field raises ValueError."""
+        with pytest.raises(ValueError, match="can only be used on TEXT fields"):
+            translator.translate(
+                f"SELECT * FROM {basic_index} WHERE category LIKE '%phone%'"
+            )
+
+
+class TestTranslatorSuffixInfix:
+    """Tests for suffix and infix (contains) pattern matching.
+
+    PostgreSQL analogy: LIKE '%term' and LIKE '%term%'.
+    RediSearch uses *term and *term* respectively.
+    """
+
+    def test_suffix_match(self, translator: Translator, basic_index: str):
+        """LIKE '%phone' → suffix match @field:*phone."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE '%phone'"
+        )
+        assert "@title:*phone" in result.query_string
+
+    def test_infix_match(self, translator: Translator, basic_index: str):
+        """LIKE '%phone%' → infix/contains match @field:*phone*."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE '%phone%'"
+        )
+        assert "@title:*phone*" in result.query_string
+
+    def test_prefix_still_works(self, translator: Translator, basic_index: str):
+        """LIKE 'lap%' → prefix match @field:lap* (unchanged)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE title LIKE 'lap%'"
+        )
+        assert "@title:lap*" in result.query_string
+
+
+class TestTranslatorORInText:
+    """Tests for OR/union within text field searches.
+
+    Inspired by PostgreSQL's to_tsquery('fat | rat') and
+    websearch_to_tsquery('fat OR rat') — natural OR syntax
+    maps to RediSearch's @field:(term1|term2).
+    """
+
+    def test_fulltext_or(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'laptop OR tablet') → @field:(laptop|tablet)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'laptop OR tablet')"
+        )
+        assert "@title:(laptop|tablet)" in result.query_string
+
+    def test_fulltext_multiple_or(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'a OR b OR c') → @field:(a|b|c)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'laptop OR tablet OR phone')"
+        )
+        assert "@title:(laptop|tablet|phone)" in result.query_string
+
+
+class TestTranslatorProximity:
+    """Tests for proximity search (slop + inorder).
+
+    Inspired by PostgreSQL's phraseto_tsquery / <N> FOLLOWED BY operator.
+    Maps to RediSearch query attributes: => { $slop: N; $inorder: true; }.
+    """
+
+    def test_fulltext_with_slop(self, translator: Translator, basic_index: str):
+        """fulltext(field, 'gaming laptop', 2) → slop=2 query attribute."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'gaming laptop', 2)"
+        )
+        assert "$slop: 2;" in result.query_string
+
+    def test_fulltext_with_slop_and_inorder(
+        self, translator: Translator, basic_index: str
+    ):
+        """fulltext(field, 'gaming laptop', 2, true) → slop=2 + inorder."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE fulltext(title, 'gaming laptop', 2, true)"
+        )
+        assert "$slop: 2;" in result.query_string
+        assert "$inorder: true;" in result.query_string
+
+
+class TestTranslatorScoring:
+    """Tests for relevance scoring (WITHSCORES + SCORER).
+
+    Inspired by PostgreSQL's ts_rank(vector, query) AS rank in SELECT.
+    Maps to RediSearch's WITHSCORES and SCORER flags on FT.SEARCH.
+
+    SQL: SELECT name, score() AS relevance FROM idx WHERE fulltext(...)
+    Redis: FT.SEARCH idx "@field:(term)" WITHSCORES SCORER BM25
+    """
+
+    def test_score_default_bm25(self, translator: Translator, basic_index: str):
+        """score() in SELECT → WITHSCORES + SCORER BM25."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" in result.args
+        assert "SCORER" in result.args
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "BM25"
+
+    def test_score_custom_scorer(self, translator: Translator, basic_index: str):
+        """score('TFIDF') in SELECT → WITHSCORES + SCORER TFIDF."""
+        result = translator.translate(
+            f"SELECT title, score('TFIDF') AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" in result.args
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "TFIDF"
+
+    def test_score_custom_scorer_preserves_case(
+        self, translator: Translator, basic_index: str
+    ):
+        """score('MyScorer') preserves caller-provided casing."""
+        result = translator.translate(
+            f"SELECT title, score('MyScorer') AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop')"
+        )
+        scorer_idx = result.args.index("SCORER")
+        assert result.args[scorer_idx + 1] == "MyScorer"
+
+    def test_duplicate_score_raises(self, translator: Translator, basic_index: str):
+        """Multiple score() expressions in the same query raise ValueError."""
+        with pytest.raises(ValueError, match="Only one score"):
+            translator.translate(
+                f"SELECT score() AS s1, score('TFIDF') AS s2 FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop')"
+            )
+
+    def test_no_score_no_withscores(self, translator: Translator, basic_index: str):
+        """Without score() → no WITHSCORES flag."""
+        result = translator.translate(
+            f"SELECT title FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "WITHSCORES" not in result.args
+
+    def test_score_only_select_emits_return_0(
+        self, translator: Translator, basic_index: str
+    ):
+        """SELECT score() AS relevance (no other fields) → RETURN 0 to prevent payload leak."""
+        result = translator.translate(
+            f"SELECT score() AS relevance FROM {basic_index} WHERE fulltext(title, 'laptop')"
+        )
+        assert "RETURN" in result.args
+        ret_idx = result.args.index("RETURN")
+        assert result.args[ret_idx + 1] == "0"
+        assert "WITHSCORES" in result.args
+
+    def test_score_with_aggregate_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """score() combined with GROUP BY (forces FT.AGGREGATE) raises ValueError."""
+        with pytest.raises(ValueError, match="score.*not supported.*FT.AGGREGATE"):
+            translator.translate(
+                f"SELECT COUNT(*), score() AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop') GROUP BY category"
+            )
+
+    def test_score_too_many_args_raises(self, translator: Translator, basic_index: str):
+        """score() with more than one argument raises ValueError."""
+        with pytest.raises(ValueError, match="at most one argument"):
+            translator.translate(
+                f"SELECT score('BM25', 'extra') AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop')"
+            )
+
+    def test_order_by_score_desc_omits_sortby(
+        self, translator: Translator, basic_index: str
+    ):
+        """ORDER BY score_alias DESC omits SORTBY (RediSearch sorts by relevance by default)."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop') ORDER BY relevance DESC"
+        )
+        assert "WITHSCORES" in result.args
+        assert "SORTBY" not in result.args
+
+    def test_order_by_score_asc_raises(self, translator: Translator, basic_index: str):
+        """ORDER BY score_alias ASC raises ValueError (not supported by RediSearch)."""
+        with pytest.raises(ValueError, match="ASC is not supported"):
+            translator.translate(
+                f"SELECT title, score() AS relevance FROM {basic_index} "
+                "WHERE fulltext(title, 'laptop') ORDER BY relevance ASC"
+            )
+
+    def test_order_by_real_field_with_score_still_works(
+        self, translator: Translator, basic_index: str
+    ):
+        """ORDER BY a real field (not score alias) still emits SORTBY."""
+        result = translator.translate(
+            f"SELECT title, score() AS relevance FROM {basic_index} "
+            "WHERE fulltext(title, 'laptop') ORDER BY price DESC"
+        )
+        assert "SORTBY" in result.args
+        idx = result.args.index("SORTBY")
+        assert result.args[idx + 1] == "price"

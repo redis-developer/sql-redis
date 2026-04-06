@@ -28,6 +28,7 @@ class TranslatedQuery:
     query_string: str
     args: list[str] = field(default_factory=list)
     params: dict[str, object] = field(default_factory=dict)  # Named parameters
+    score_alias: str | None = None  # Alias for score column when WITHSCORES is used
 
     def to_command_list(self) -> list[str]:
         """Return as a list suitable for redis.execute_command()."""
@@ -161,6 +162,13 @@ class Translator:
         query_string = self._build_query_string(analyzed)
 
         if use_aggregate:
+            if parsed.scoring is not None:
+                raise ValueError(
+                    "score() is not supported with FT.AGGREGATE queries. "
+                    "WITHSCORES / SCORER are FT.SEARCH-only features. "
+                    "Remove score() or avoid GROUP BY / aggregation functions "
+                    "in the same query."
+                )
             return self._build_aggregate(analyzed, query_string)
         else:
             return self._build_search(analyzed, query_string)
@@ -218,11 +226,28 @@ class Translator:
                 condition.field, is_missing=(condition.operator == "IS_NULL")
             )
 
-        # Determine if this is a negation (either explicit or via != operator)
+        # Reject text-only operators on non-TEXT fields — fuzzy() and fulltext()
+        # only make sense for TEXT fields; silently falling through to TAG/NUMERIC
+        # would produce incorrect queries.
+        if condition.operator in ("FUZZY", "FULLTEXT", "LIKE") and field_type != "TEXT":
+            op_display = (
+                "LIKE"
+                if condition.operator == "LIKE"
+                else f"{condition.operator.lower()}()"
+            )
+            raise ValueError(
+                f"{op_display} can only be used on TEXT fields, "
+                f"but '{condition.field}' is {field_type or 'unknown'}."
+            )
+
+        # Resolve negation using XOR so that double negation cancels out.
+        # e.g. NOT (field != 'x') → negated=True, op='!=' → is_negated=False.
         operator = condition.operator
-        is_negated = condition.negated or operator == "!="
-        if condition.negated and operator == "=":
-            operator = "!="
+        is_negated = condition.negated ^ (operator == "!=")
+        # Normalize = / != to match the resolved negation state so every
+        # downstream builder sees a consistent (operator, negated) pair.
+        if operator in ("=", "!="):
+            operator = "!=" if is_negated else "="
 
         if field_type == "TEXT":
             return self._query_builder.build_text_condition(
@@ -230,6 +255,9 @@ class Translator:
                 operator,
                 str(condition.value),
                 is_negated,
+                fuzzy_level=condition.fuzzy_level,
+                slop=condition.slop,
+                inorder=condition.inorder,
             )
         elif field_type == "TAG":
             # Keep list value for IN clauses, convert scalar to string
@@ -252,6 +280,12 @@ class Translator:
                 low_val = self._convert_to_numeric(low)
                 high_val = self._convert_to_numeric(high)
                 numeric_value = (low_val, high_val)
+            elif isinstance(condition.value, bool):
+                raise ValueError(
+                    f"Boolean value {condition.value!r} is not valid in a "
+                    "numeric context. Use 1/0 instead of true/false for "
+                    "numeric fields."
+                )
             elif isinstance(condition.value, (int, float)):
                 numeric_value = condition.value
             else:
@@ -283,6 +317,11 @@ class Translator:
         Raises:
             ValueError: If conversion fails.
         """
+        if isinstance(value, bool):
+            raise ValueError(
+                f"Boolean value {value!r} is not valid in a numeric context. "
+                "Use 1/0 instead of true/false for numeric fields."
+            )
         if isinstance(value, (int, float)):
             return value
         if isinstance(value, str):
@@ -319,20 +358,50 @@ class Translator:
             if analyzed.vector_search.alias not in return_fields:
                 return_fields.append(analyzed.vector_search.alias)
 
-        if return_fields and return_fields != ["*"]:
+        # When score() is the only SELECT expression, parsed.fields is empty.
+        # We still need a RETURN clause to avoid leaking full document payloads.
+        # Score itself is delivered via WITHSCORES (not RETURN), but we must
+        # emit RETURN 0 so Redis returns no document attributes beyond the score.
+        score_only_select = parsed.scoring is not None and not return_fields
+
+        if score_only_select:
+            # RETURN 0 — suppress all document fields, score comes via WITHSCORES
+            args.extend(["RETURN", "0"])
+        elif return_fields and return_fields != ["*"]:
             args.append("RETURN")
             args.append(str(len(return_fields)))
             args.extend(return_fields)
 
-        # SORTBY
+        # SORTBY — skip if the ORDER BY field is a score() alias, because
+        # WITHSCORES already returns results in relevance order and the alias
+        # is not a sortable indexed field.
+        score_alias_name = parsed.scoring.alias if parsed.scoring else None
         if parsed.orderby_fields:
             field_name, direction = parsed.orderby_fields[0]
-            args.extend(["SORTBY", field_name, direction])
+            if field_name == score_alias_name:
+                # score() alias — not a real field; RediSearch sorts by
+                # relevance by default when no SORTBY is specified.
+                if direction == "ASC":
+                    raise ValueError(
+                        f"ORDER BY {field_name} ASC is not supported: "
+                        "RediSearch returns results in descending relevance "
+                        "order by default and does not support ascending "
+                        "score sorting via FT.SEARCH."
+                    )
+                # DESC is the default — omit SORTBY entirely
+            else:
+                args.extend(["SORTBY", field_name, direction])
 
         # LIMIT
         if parsed.limit is not None:
             offset = parsed.offset or 0
             args.extend(["LIMIT", str(offset), str(parsed.limit)])
+
+        # Scoring — WITHSCORES and SCORER
+        if parsed.scoring is not None:
+            args.append("WITHSCORES")
+            if parsed.scoring.scorer:
+                args.extend(["SCORER", parsed.scoring.scorer])
 
         # DIALECT 2 — unconditionally appended as the last arguments
         args.extend(["DIALECT", "2"])
@@ -343,6 +412,7 @@ class Translator:
             query_string=query_string,
             args=args,
             params=params,
+            score_alias=(parsed.scoring.alias if parsed.scoring is not None else None),
         )
 
     def _build_geo_filter_args(self, geo_cond: GeoDistanceCondition) -> list[str]:

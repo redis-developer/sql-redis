@@ -612,22 +612,16 @@ class TestSQLParserEdgeCases:
         assert len(result.conditions) == 0
 
     def test_parse_fulltext_non_column_first_arg(self):
-        """Parse fulltext with non-column first argument."""
+        """Parse fulltext with non-column first argument raises ValueError."""
         parser = SQLParser()
-        result = parser.parse(
-            "SELECT * FROM products WHERE fulltext(UPPER(title), 'query')"
-        )
-
-        # First arg is a function, not Column - condition skipped
-        assert len(result.conditions) == 0
+        with pytest.raises(ValueError, match="must be a column name"):
+            parser.parse("SELECT * FROM products WHERE fulltext(UPPER(title), 'query')")
 
     def test_parse_fulltext_insufficient_args(self):
-        """Parse fulltext with insufficient arguments."""
+        """Parse fulltext with insufficient arguments raises ValueError."""
         parser = SQLParser()
-        result = parser.parse("SELECT * FROM products WHERE fulltext(title)")
-
-        # Only 1 arg, needs >= 2 - condition skipped
-        assert len(result.conditions) == 0
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM products WHERE fulltext(title)")
 
     def test_parse_geo_distance_no_args(self):
         """Parse geo_distance with no arguments in comparison."""
@@ -855,3 +849,85 @@ class TestSQLParserExists:
         parser = SQLParser()
         with pytest.raises(ValueError, match="exists.*aggregate"):
             parser.parse("SELECT * FROM idx WHERE exists(email)")
+
+
+class TestSQLParserFulltextValidation:
+    """Tests for fulltext() argument validation."""
+
+    def test_fulltext_negative_slop_raises(self):
+        """Negative slop in fulltext() raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', -1)")
+
+    def test_fulltext_float_slop_raises(self):
+        """Float slop in fulltext() raises ValueError instead of silently truncating."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', 2.9)")
+
+    def test_fuzzy_float_level_raises(self):
+        """Float fuzzy level raises ValueError instead of silently truncating."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2.9)")
+
+    def test_fulltext_boolean_slop_raises(self):
+        """Boolean slop in fulltext() raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title, 'hello world', true)")
+
+    def test_fuzzy_boolean_level_raises(self):
+        """Boolean fuzzy level raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be an integer"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', true)")
+
+    def test_fulltext_invalid_inorder_raises(self):
+        """Invalid inorder value (e.g., 'yes') raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="inorder argument must be a boolean"):
+            parser.parse(
+                "SELECT * FROM idx WHERE fulltext(title, 'hello world', 0, 'yes')"
+            )
+
+    def test_fulltext_no_value_raises(self):
+        """fulltext() with only field arg raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fulltext(title)")
+
+    def test_fuzzy_no_value_raises(self):
+        """fuzzy() with only field arg raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="requires at least 2 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title)")
+
+    def test_fulltext_too_many_args_raises(self):
+        """fulltext() with more than 4 arguments raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="at most 4 arguments"):
+            parser.parse(
+                "SELECT * FROM idx WHERE fulltext(title, 'hello world', 2, true, 'extra')"
+            )
+
+    def test_fuzzy_too_many_args_raises(self):
+        """fuzzy() with more than 3 arguments raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="at most 3 arguments"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy(title, 'laptap', 2, 'extra')")
+
+    def test_fuzzy_non_column_first_arg_raises(self):
+        """fuzzy() with non-column first argument raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be a column name"):
+            parser.parse("SELECT * FROM idx WHERE fuzzy('title', 'laptap')")
+
+    def test_score_non_literal_arg_raises(self):
+        """score() with a non-literal argument (e.g., column ref) raises ValueError."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="must be a literal scorer name"):
+            parser.parse(
+                "SELECT score(my_column) AS relevance FROM idx WHERE fulltext(title, 'laptop')"
+            )
