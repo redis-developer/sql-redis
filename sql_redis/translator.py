@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
 from sql_redis.parser import (
     SQL_TO_REDIS_DATE_FUNCTIONS,
+    BoolGroup,
+    BoolLeaf,
     Condition,
     GeoDistanceCondition,
     ParsedQuery,
@@ -119,7 +121,10 @@ class Translator:
         # Geo filters are applied as top-level command args (GEOFILTER/FILTER) and
         # are not part of the boolean expression. Combining with OR would change
         # semantics (e.g., `A OR geo_distance(...)` would become `(A) AND geo_filter`).
-        if parsed.geo_conditions and parsed.boolean_operator == "OR":
+        # ``has_or_in_where`` is set by the parser whenever an OR appears in
+        # WHERE, even when the boolean tree collapses (e.g., the OR's other
+        # branch was a geo_distance predicate that produced no tree leaf).
+        if parsed.geo_conditions and parsed.has_or_in_where:
             raise ValueError(
                 "Geo distance predicates cannot be combined with OR; "
                 "they are applied as top-level filters and would change query "
@@ -138,8 +143,12 @@ class Translator:
 
         # Validate: date function predicates cannot be combined with OR
         # Date filters are applied via FILTER clauses (ANDed with query).
-        # Combining with OR would change semantics.
-        if has_date_func_conditions and parsed.boolean_operator == "OR":
+        # Combining with OR would change semantics. Walk the tree to reject
+        # mixing at any depth (e.g., `A AND (YEAR(x) = 2024 OR B)`), not just
+        # when OR is the root operator.
+        if has_date_func_conditions and self._tree_has_date_in_or(
+            parsed.condition_tree
+        ):
             raise ValueError(
                 "Date function predicates cannot be combined with OR; "
                 "they are applied as top-level filters and would change query "
@@ -174,36 +183,30 @@ class Translator:
             return self._build_search(analyzed, query_string)
 
     def _build_query_string(self, analyzed: AnalyzedQuery) -> str:
-        """Build the RediSearch query string from conditions."""
+        """Build the RediSearch query string from conditions.
+
+        Walks the boolean tree built by the parser so that mixed AND/OR
+        expressions like ``A AND (B OR C)`` keep their original grouping
+        instead of collapsing onto a single boolean operator.
+        """
         parsed = analyzed.parsed
-        conditions = parsed.conditions
 
-        # Filter out date function conditions (they need FILTER in AGGREGATE)
-        regular_conditions = [
-            c for c in conditions if not self._is_date_function_condition(c)
-        ]
+        # Render the boolean tree (with proper RediSearch parenthesization)
+        # if one was built by the parser. Date-function leaves are skipped —
+        # they are emitted as FILTER args by the FT.AGGREGATE path.
+        if parsed.condition_tree is not None:
+            combined = self._render_bool_tree(parsed.condition_tree, analyzed) or ""
+        else:
+            combined = ""
 
-        if not regular_conditions and not analyzed.vector_search:
+        if not combined and not analyzed.vector_search:
             return "*"
-
-        # Build condition strings by type
-        condition_strings: list[str] = []
-
-        for condition in regular_conditions:
-            field_type = analyzed.get_field_type(condition.field)
-            condition_str = self._build_condition(condition, field_type)
-            condition_strings.append(condition_str)
-
-        # Combine with boolean operator
-        combined = self._query_builder.combine_conditions(
-            condition_strings, parsed.boolean_operator
-        )
 
         # Handle vector search with prefilter
         if analyzed.vector_search:
             vs = analyzed.vector_search
             # Vector search uses KNN syntax
-            if analyzed.has_prefilter:
+            if analyzed.has_prefilter and combined:
                 # Prefilter: (filter)=>[KNN k @field $vec]
                 return f"({combined})=>[KNN {vs.k} @{vs.field} $vector AS {vs.alias}]"
             else:
@@ -211,6 +214,53 @@ class Translator:
                 return f"*=>[KNN {vs.k} @{vs.field} $vector AS {vs.alias}]"
 
         return combined
+
+    def _render_bool_tree(self, node, analyzed: AnalyzedQuery) -> str | None:
+        """Recursively render a BoolLeaf/BoolGroup tree to a query string.
+
+        Date-function leaves are dropped (handled via FILTER in FT.AGGREGATE).
+        OR groups are wrapped in parentheses so that, when nested inside an
+        AND group, RediSearch's higher AND precedence does not silently
+        re-associate the expression. Returns None for an empty tree (e.g.,
+        a group that contained only date-function leaves).
+        """
+        if isinstance(node, BoolLeaf):
+            condition = node.condition
+            if self._is_date_function_condition(condition):
+                return None
+            field_type = analyzed.get_field_type(condition.field)
+            return self._build_condition(condition, field_type)
+        if isinstance(node, BoolGroup):
+            rendered = [
+                r
+                for r in (self._render_bool_tree(c, analyzed) for c in node.children)
+                if r
+            ]
+            if not rendered:
+                return None
+            if len(rendered) == 1:
+                return rendered[0]
+            if node.operator == "OR":
+                return "(" + "|".join(rendered) + ")"
+            # AND: space-joined; RediSearch gives AND higher precedence than OR
+            # so child OR groups (already wrapped in parens above) keep grouping.
+            return " ".join(rendered)
+        return None
+
+    def _tree_has_date_in_or(self, node, in_or: bool = False) -> bool:
+        """Return True if any date-function leaf is reachable through an OR.
+
+        Walks the boolean tree and returns True as soon as a date-function
+        condition is found beneath an OR ancestor — used to reject
+        ``A OR YEAR(x) = 2024`` and similar mixes that the FT.AGGREGATE
+        FILTER path cannot represent.
+        """
+        if isinstance(node, BoolLeaf):
+            return in_or and self._is_date_function_condition(node.condition)
+        if isinstance(node, BoolGroup):
+            now_in_or = in_or or node.operator == "OR"
+            return any(self._tree_has_date_in_or(c, now_in_or) for c in node.children)
+        return False
 
     def _build_condition(self, condition: Condition, field_type: str | None) -> str:
         """Build a single condition string based on field type."""

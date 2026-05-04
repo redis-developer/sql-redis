@@ -85,6 +85,25 @@ class QueryBuilder:
         # then escape double quotes.
         return value.replace("\\", "\\\\").replace('"', '\\"')
 
+    @classmethod
+    def _escape_text_equality_term(cls, term: str) -> str:
+        """Escape single-term equality while preserving legacy wildcard semantics.
+
+        For backward compatibility, TEXT equality on a single token continues to
+        behave like a RediSearch token query instead of an exact quoted phrase.
+        This preserves wildcard markers like `*` and fuzzy markers like `%term%`,
+        while still escaping other operator characters.
+        """
+        result = []
+        for index, char in enumerate(term):
+            if char == "*" or (char == "~" and index == 0):
+                result.append(char)
+            elif char in cls.TEXT_QUERY_SPECIAL_CHARS:
+                result.append(f"\\{char}")
+            else:
+                result.append(char)
+        return "".join(result)
+
     def build_text_condition(
         self,
         field: str | list[str],
@@ -101,7 +120,7 @@ class QueryBuilder:
         Args:
             field: Field name or list of field names for multi-field search.
             operator: One of =, !=, FULLTEXT, LIKE, FUZZY.
-                - = / !=: exact phrase match, value wrapped in double quotes.
+                - = / !=: single-term token match, or multi-word exact phrase.
                 - FULLTEXT: tokenized keyword search with stopword filtering.
                 - LIKE: prefix/suffix/infix pattern (SQL % → RediSearch *).
                 - FUZZY: Levenshtein fuzzy match.
@@ -112,7 +131,7 @@ class QueryBuilder:
             inorder: If True with slop, require terms in order.
 
         Returns:
-            RediSearch query syntax like @field:"exact phrase" or @field:(term1 term2).
+            RediSearch query syntax like @field:term or @field:"exact phrase".
         """
         # Derive negation from both the flag and the operator itself,
         # consistent with how build_tag_condition handles != via operator.
@@ -143,38 +162,43 @@ class QueryBuilder:
             pct = "%" * level
             search_value = f"{pct}{escaped}{pct}"
         elif operator in ("=", "!="):
-            # Exact phrase match — wrap in double quotes.
-            # Strip default stopwords because RediSearch does not index them;
-            # keeping them in the quoted phrase causes a query-time error
-            # (e.g. "diagnosing and treating" fails on "and").
-            # Since the indexer assigns consecutive positions after dropping
-            # stopwords, the stripped phrase matches correctly.
             words = value.split()
-            removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
-            filtered = [w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS]
-
-            if removed:
-                phrase_words = filtered if filtered else words
-                if filtered:
-                    sw_msg = f"Stopwords {removed} were removed from"
-                else:
-                    sw_msg = (
-                        f"All tokens in '{value}' are stopwords and may not "
-                        "be indexed in"
-                    )
-                warnings.warn(
-                    f"{sw_msg} exact phrase '{value}'. "
-                    "By default, Redis does not index stopwords. "
-                    "To include stopwords in your index, create it "
-                    "with STOPWORDS 0.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+            if len(words) == 1:
+                search_value = self._escape_text_equality_term(words[0])
             else:
-                phrase_words = words
+                # Multi-word equality remains an exact phrase match.
+                # Strip default stopwords because RediSearch does not index them;
+                # keeping them in the quoted phrase causes a query-time error
+                # (e.g. "diagnosing and treating" fails on "and").
+                # Since the indexer assigns consecutive positions after dropping
+                # stopwords, the stripped phrase matches correctly.
+                removed = [w for w in words if w.lower() in REDIS_DEFAULT_STOPWORDS]
+                filtered = [
+                    w for w in words if w.lower() not in REDIS_DEFAULT_STOPWORDS
+                ]
 
-            escaped = self._escape_text_value(" ".join(phrase_words))
-            search_value = f'"{escaped}"'
+                if removed:
+                    phrase_words = filtered if filtered else words
+                    if filtered:
+                        sw_msg = f"Stopwords {removed} were removed from"
+                    else:
+                        sw_msg = (
+                            f"All tokens in '{value}' are stopwords and may not "
+                            "be indexed in"
+                        )
+                    warnings.warn(
+                        f"{sw_msg} exact phrase '{value}'. "
+                        "By default, Redis does not index stopwords. "
+                        "To include stopwords in your index, create it "
+                        "with STOPWORDS 0.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    phrase_words = words
+
+                escaped = self._escape_text_value(" ".join(phrase_words))
+                search_value = f'"{escaped}"'
         elif re.search(r"(?:^|\s+)OR(?:\s+|$)", value):
             # OR union within text field: split on uppercase-only OR with
             # flexible whitespace, escape each term, join with |.
@@ -270,7 +294,7 @@ class QueryBuilder:
                 )
 
             escaped_words = []
-            for w in (filtered_words if filtered_words else words):
+            for w in filtered_words if filtered_words else words:
                 if w.startswith("~"):
                     # Preserve ~ optional-term prefix, escape the rest
                     escaped_words.append("~" + self._escape_fulltext_term(w[1:]))
