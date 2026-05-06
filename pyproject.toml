@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/redis/sql-redis"
-Repository = "https://github.com/redis/sql-redis"
+Homepage = "https://github.com/redis-developer/sql-redis"
+Repository = "https://github.com/redis-developer/sql-redis"
 
 [build-system]
 requires = ["hatchling"]
