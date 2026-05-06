@@ -54,6 +54,9 @@ Thumbs.db
 .ai/
 nitin_docs/
 
+# Sphinx build output
+docs/_build/
+
 
 # Jupyter notebooks
 *.ipynb
