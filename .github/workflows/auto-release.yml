@@ -1,0 +1,235 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      first_release:
+        description: "Bootstrap: publish the version currently in pyproject.toml. Bypasses the auto:release label gate and skips version bumping. Use only for the first release or manual recovery."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_VERSION: "0.7.13"
+  AUTO_VERSION: "11.3.6"
+  RELEASE_BOT_NAME: "github-actions[bot]"
+  RELEASE_BOT_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+
+jobs:
+  gate:
+    name: Gate on merged PR label
+    runs-on: ubuntu-latest
+    # Prevent infinite loops from the bot's "chore(release)" commit.
+    if: github.actor != 'github-actions[bot]'
+    outputs:
+      should_release: ${{ steps.find_pr.outputs.should_release }}
+      pr_number: ${{ steps.find_pr.outputs.pr_number }}
+    steps:
+      - name: Find merged PR and check labels
+        id: find_pr
+        uses: actions/github-script@v7
+        env:
+          FIRST_RELEASE: ${{ github.event.inputs.first_release }}
+        with:
+          script: |
+            // Manual bootstrap: bypass the PR label check entirely.
+            if (context.eventName === 'workflow_dispatch' && process.env.FIRST_RELEASE === 'true') {
+              core.notice('Manual first_release=true; bypassing PR label check.');
+              core.setOutput('should_release', 'true');
+              core.setOutput('pr_number', '');
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const sha = context.sha;
+            const maxAttempts = 6;
+            let pulls;
+            // GitHub can briefly lag in associating a merge commit with its PR, so retry.
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+              pulls = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner, repo, commit_sha: sha,
+              });
+              if (pulls.data.length) break;
+              if (attempt < maxAttempts) {
+                await new Promise((r) => setTimeout(r, 10000));
+              }
+            }
+            if (!pulls.data || !pulls.data.length) {
+              core.notice(`No PR associated with ${sha}. Not releasing.`);
+              core.setOutput('should_release', 'false');
+              core.setOutput('pr_number', '');
+              return;
+            }
+            const pr = pulls.data.find((p) => p.merged_at && p.base?.ref === 'main') ?? pulls.data[0];
+            const labels = (pr.labels || []).map((l) => l.name);
+            const should = labels.includes('auto:release');
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('should_release', should ? 'true' : 'false');
+            core.notice(`PR #${pr.number} labels: ${labels.join(', ')}`);
+            core.notice(`should_release=${should}`);
+
+  release:
+    name: Tag, release, and publish
+    runs-on: ubuntu-latest
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
+    env:
+      # 'true' for manual bootstrap runs; 'false' or empty otherwise.
+      FIRST_RELEASE: ${{ github.event.inputs.first_release || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          # RELEASE_PAT (a PAT with repo + workflow scopes) lets the bot push to
+          # protected branches and trigger other workflows. Falls back to
+          # GITHUB_TOKEN for repos without branch protection.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install auto
+        run: |
+          set -euo pipefail
+          curl -L "https://github.com/intuit/auto/releases/download/v${AUTO_VERSION}/auto-linux.gz" -o auto-linux.gz
+          gunzip auto-linux.gz
+          chmod +x auto-linux
+          sudo mv auto-linux /usr/local/bin/auto
+          auto --version
+
+      - name: Sanity build (pre-tag)
+        run: uv build
+
+      - name: Capture previous tag
+        id: previous_tag
+        run: |
+          set -euo pipefail
+          echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve next version (auto)
+        id: resolve_version
+        if: env.FIRST_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RAW_VERSION="$(auto shipit --name "${RELEASE_BOT_NAME}" --email "${RELEASE_BOT_EMAIL}" --dry-run --quiet | tail -n1 | tr -d '\r')"
+          VERSION="${RAW_VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Could not resolve release version from auto."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Apply version to pyproject.toml
+        if: env.FIRST_RELEASE != 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.resolve_version.outputs.version }}"
+          sed -i "s/^version = \".*\"$/version = \"${VERSION}\"/" pyproject.toml
+          grep '^version = ' pyproject.toml
+
+      - name: Commit version bump
+        if: env.FIRST_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- pyproject.toml; then
+            echo "No pyproject version change to commit."
+          else
+            git config user.name "${RELEASE_BOT_NAME}"
+            git config user.email "${RELEASE_BOT_EMAIL}"
+            git add pyproject.toml
+            # [skip ci] avoids re-running this workflow on the bot's own commit.
+            git commit -m "chore(release): v${{ steps.resolve_version.outputs.version }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Read final version from pyproject.toml
+        id: final_version
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)".*/\1/')"
+          if [ -z "$VERSION" ]; then
+            echo "Could not read version from pyproject.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Final version: $VERSION"
+
+      - name: Capture release commit SHA
+        id: release_commit
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create labels (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: auto create-labels
+
+      - name: Create and push tag
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.final_version.outputs.version }}"
+          TARGET_SHA="${{ steps.release_commit.outputs.sha }}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            EXISTING_SHA="$(git rev-list -n1 "$TAG")"
+            if [ "$EXISTING_SHA" = "$TARGET_SHA" ]; then
+              echo "Tag $TAG already exists at $TARGET_SHA. Skipping."
+              exit 0
+            fi
+            echo "Tag $TAG exists at $EXISTING_SHA but expected $TARGET_SHA."
+            exit 1
+          fi
+          git tag "$TAG" "$TARGET_SHA"
+          git push origin "$TAG"
+
+      - name: Create GitHub release with auto notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(--to "${{ steps.release_commit.outputs.sha }}" --use-version "v${{ steps.final_version.outputs.version }}")
+          if [ -n "${{ steps.previous_tag.outputs.tag }}" ]; then
+            args=(--from "${{ steps.previous_tag.outputs.tag }}" "${args[@]}")
+          fi
+          auto release "${args[@]}"
+
+      - name: Build final artifacts
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          uv build
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI }}
+        run: uv publish
