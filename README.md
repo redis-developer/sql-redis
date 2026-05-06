@@ -1,6 +1,6 @@
 # sql-redis
 
-A proof-of-concept SQL-to-Redis translator that converts SQL SELECT statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands.
+A proof-of-concept SQL-to-Redis translator that converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands.
 
 ## Status
 
