@@ -3,20 +3,24 @@
 ## Reporting a Vulnerability
 
 If you believe you have discovered a security vulnerability in `sql-redis`,
-please **do not open a public GitHub issue or pull request**.
+please report it **privately** through GitHub's private vulnerability
+reporting:
 
-Instead, report it privately to the Redis applied AI team at
-**applied.ai@redis.com**.
+1. Go to the [Security tab](https://github.com/redis-developer/sql-redis/security)
+   of the repository.
+2. Click **Report a vulnerability**.
+3. Fill in the form with a description of the issue, reproduction steps,
+   affected versions, and any suggested mitigations.
 
-Please include:
+This sends the report directly to maintainers without making it public, and
+gives us a place to coordinate the fix and disclosure timeline with you.
 
-- A description of the issue and the potential impact.
-- Steps to reproduce the vulnerability (proof of concept, sample SQL, etc.).
-- The version of `sql-redis` and Redis you are using.
-- Any suggested mitigations, if you have them.
+**Please do not open a public GitHub issue or pull request** for security
+reports — that would disclose the vulnerability before a fix is available.
 
-We will acknowledge receipt within five business days and work with you on a
-disclosure timeline.
+For non-security bugs and feature requests, regular
+[GitHub issues](https://github.com/redis-developer/sql-redis/issues) are the
+right place.
 
 ## Supported Versions
 
