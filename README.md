@@ -35,13 +35,13 @@ for row in result.rows:
 
 ## Documentation
 
-Full documentation, including a Diátaxis-aligned guide, concept docs, and API reference, lives in [`docs/`](docs/) and is published via Read the Docs.
+Full documentation is published at **[docs.redisvl.com/projects/sql-redis/](https://docs.redisvl.com/projects/sql-redis/)**.
 
-- **Getting started:** [`docs/user_guide/getting-started.md`](docs/user_guide/getting-started.md)
-- **How-to guides:** [`docs/user_guide/how_to_guides/`](docs/user_guide/how_to_guides/)
-- **Concepts and design:** [`docs/concepts/`](docs/concepts/)
-- **API reference:** [`docs/api/`](docs/api/)
-- **SQL syntax catalog:** [`docs/api/sql-syntax.md`](docs/api/sql-syntax.md)
+- **Getting started:** [User Guide](https://docs.redisvl.com/projects/sql-redis/en/latest/user_guide/getting-started.html)
+- **How-to guides:** [How-to Guides](https://docs.redisvl.com/projects/sql-redis/en/latest/user_guide/how_to_guides/)
+- **Concepts and design:** [Concepts](https://docs.redisvl.com/projects/sql-redis/en/latest/concepts/)
+- **API reference:** [API](https://docs.redisvl.com/projects/sql-redis/en/latest/api/)
+- **SQL syntax catalog:** [SQL Syntax](https://docs.redisvl.com/projects/sql-redis/en/latest/api/sql-syntax.html)
 
 ## For AI agents
 

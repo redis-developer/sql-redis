@@ -106,8 +106,8 @@ Full reference, generated from docstrings, is at `docs/api/`.
 
 sql-redis sits in the [Redis AI Hub](https://redis.io/ai-hub/) under the
 *Experimental* tier as "SQL for Redis". Public docs URL:
-[`ai.redis.io/sql/`](https://ai.redis.io/sql/). The hub's docs standards
-(Diataxis layout, autoclass-driven API reference, AI-agent affordances) are
-documented at
+[`docs.redisvl.com/projects/sql-redis/`](https://docs.redisvl.com/projects/sql-redis/).
+The hub's docs standards (Diataxis layout, autoclass-driven API reference,
+AI-agent affordances) are documented at
 [`HUB_DOCS_STANDARDS.md`](https://github.com/redis/docs/blob/main/HUB_DOCS_STANDARDS.md)
 in the hub repo.
