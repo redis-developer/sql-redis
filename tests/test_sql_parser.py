@@ -675,16 +675,43 @@ class TestSQLParserEdgeCases:
         assert result.index == ""
 
     def test_parse_count_distinct(self):
-        """Parse COUNT(DISTINCT field) - this isn't Column or Star."""
+        """COUNT(DISTINCT field) routes to the COUNT_DISTINCT reducer."""
         parser = SQLParser()
         result = parser.parse(
             "SELECT COUNT(DISTINCT category) AS unique_cats FROM products"
         )
 
-        # DISTINCT wraps the column, so field stays None
         assert len(result.aggregations) == 1
-        assert result.aggregations[0].function == "COUNT"
-        assert result.aggregations[0].field is None
+        assert result.aggregations[0].function == "COUNT_DISTINCT"
+        assert result.aggregations[0].field == "category"
+        assert result.aggregations[0].alias == "unique_cats"
+
+    def test_parse_count_distinct_without_alias(self):
+        """COUNT(DISTINCT field) preserves the field even without an alias."""
+        parser = SQLParser()
+        result = parser.parse("SELECT COUNT(DISTINCT title) FROM products")
+
+        assert len(result.aggregations) == 1
+        assert result.aggregations[0].function == "COUNT_DISTINCT"
+        assert result.aggregations[0].field == "title"
+
+    def test_parse_sum_distinct_raises(self):
+        """SUM(DISTINCT field) is rejected — RediSearch has no equivalent."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="DISTINCT"):
+            parser.parse("SELECT SUM(DISTINCT price) FROM products")
+
+    def test_parse_avg_distinct_raises(self):
+        """AVG(DISTINCT field) is rejected — RediSearch has no equivalent."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="DISTINCT"):
+            parser.parse("SELECT AVG(DISTINCT price) FROM products")
+
+    def test_parse_count_distinct_multi_column_raises(self):
+        """COUNT(DISTINCT a, b) is rejected — RediSearch has no equivalent."""
+        parser = SQLParser()
+        with pytest.raises(ValueError, match="single column"):
+            parser.parse("SELECT COUNT(DISTINCT a, b) FROM products")
 
     def test_parse_sum_expression(self):
         """Parse SUM of expression - not a simple Column."""
@@ -757,6 +784,123 @@ class TestSQLParserParenthesizedConditions:
         assert len(result.conditions) == 1
         assert result.conditions[0].negated is True
         assert result.conditions[0].field == "status"
+
+
+class TestSQLParserMixedBooleanLogic:
+    """Tests that the WHERE-clause boolean tree preserves AND/OR grouping.
+
+    Regression coverage for bugs where ``A AND (B OR C)``,
+    ``A OR (B AND C)`` and similar mixed expressions collapsed onto a single
+    ``boolean_operator`` and a flat ``conditions`` list, losing the grouping
+    expressed by the SQL parentheses.
+    """
+
+    def _fields(self, node):
+        """Recursively extract leaf field names from a BoolNode tree."""
+        from sql_redis.parser import BoolGroup, BoolLeaf
+
+        if isinstance(node, BoolLeaf):
+            return [node.condition.field]
+        if isinstance(node, BoolGroup):
+            return [f for c in node.children for f in self._fields(c)]
+        return []
+
+    def test_and_with_nested_or_keeps_group(self):
+        """A AND (B OR C): root is AND, with an inner OR child."""
+        from sql_redis.parser import BoolGroup, BoolLeaf
+
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT * FROM idx WHERE a = '1' AND (b = '2' OR c = '3')"
+        )
+
+        tree = result.condition_tree
+        assert isinstance(tree, BoolGroup)
+        assert tree.operator == "AND"
+        assert len(tree.children) == 2
+        # First child is the leaf `a = '1'`
+        assert isinstance(tree.children[0], BoolLeaf)
+        assert tree.children[0].condition.field == "a"
+        # Second child is the OR group with b and c
+        inner = tree.children[1]
+        assert isinstance(inner, BoolGroup)
+        assert inner.operator == "OR"
+        assert self._fields(inner) == ["b", "c"]
+
+    def test_or_with_nested_and_keeps_group(self):
+        """A OR (B AND C): root is OR, with an inner AND child."""
+        from sql_redis.parser import BoolGroup, BoolLeaf
+
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT * FROM idx WHERE a = '1' OR (b = '2' AND c = '3')"
+        )
+
+        tree = result.condition_tree
+        assert isinstance(tree, BoolGroup)
+        assert tree.operator == "OR"
+        assert len(tree.children) == 2
+        assert isinstance(tree.children[0], BoolLeaf)
+        assert tree.children[0].condition.field == "a"
+        inner = tree.children[1]
+        assert isinstance(inner, BoolGroup)
+        assert inner.operator == "AND"
+        assert self._fields(inner) == ["b", "c"]
+
+    def test_or_group_first_then_and(self):
+        """(B OR C) AND A keeps the OR group as the first child."""
+        from sql_redis.parser import BoolGroup, BoolLeaf
+
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT * FROM idx WHERE (b = '2' OR c = '3') AND a = '1'"
+        )
+
+        tree = result.condition_tree
+        assert isinstance(tree, BoolGroup)
+        assert tree.operator == "AND"
+        assert isinstance(tree.children[0], BoolGroup)
+        assert tree.children[0].operator == "OR"
+        assert self._fields(tree.children[0]) == ["b", "c"]
+        assert isinstance(tree.children[1], BoolLeaf)
+        assert tree.children[1].condition.field == "a"
+
+    def test_chained_ands_with_trailing_or_group(self):
+        """A AND B AND C AND (D OR E) flattens AND children and keeps OR."""
+        from sql_redis.parser import BoolGroup
+
+        parser = SQLParser()
+        result = parser.parse(
+            "SELECT * FROM idx "
+            "WHERE a = '1' AND b = '2' AND c = '3' AND (d = '4' OR e = '5')"
+        )
+
+        tree = result.condition_tree
+        assert isinstance(tree, BoolGroup)
+        assert tree.operator == "AND"
+        # Three AND leaves followed by an OR group — same-operator subtrees
+        # are flattened so the AND group has 4 children, not nested.
+        assert len(tree.children) == 4
+        assert self._fields(tree.children[0]) == ["a"]
+        assert self._fields(tree.children[1]) == ["b"]
+        assert self._fields(tree.children[2]) == ["c"]
+        last = tree.children[3]
+        assert isinstance(last, BoolGroup)
+        assert last.operator == "OR"
+        assert self._fields(last) == ["d", "e"]
+
+    def test_flat_and_chain_is_single_group(self):
+        """A AND B AND C produces one AND group with three children."""
+        from sql_redis.parser import BoolGroup
+
+        parser = SQLParser()
+        result = parser.parse("SELECT * FROM idx WHERE a = '1' AND b = '2' AND c = '3'")
+
+        tree = result.condition_tree
+        assert isinstance(tree, BoolGroup)
+        assert tree.operator == "AND"
+        assert len(tree.children) == 3
+        assert self._fields(tree) == ["a", "b", "c"]
 
 
 class TestSQLParserIsNull:

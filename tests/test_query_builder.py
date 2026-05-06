@@ -8,12 +8,33 @@ from sql_redis.query_builder import QueryBuilder
 class TestQueryBuilderTextFields:
     """Tests for building TEXT field query syntax."""
 
-    def test_text_single_term_exact(self):
-        """TEXT field with = wraps in quotes for exact phrase: @field:"term"."""
+    def test_text_single_term_equality_uses_token_match(self):
+        """TEXT field with = on one token uses token-match semantics."""
         builder = QueryBuilder()
         result = builder.build_text_condition("title", "=", "laptop")
 
-        assert result == '@title:"laptop"'
+        assert result == "@title:laptop"
+
+    def test_text_single_term_equality_preserves_prefix_wildcard(self):
+        """Single-term equality preserves RediSearch wildcard syntax."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", "lap*")
+
+        assert result == "@title:lap*"
+
+    def test_text_single_term_equality_preserves_suffix_wildcard(self):
+        """Single-term equality preserves suffix wildcard syntax."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", "*book")
+
+        assert result == "@title:*book"
+
+    def test_text_single_term_equality_preserves_fuzzy_markers(self):
+        """Single-term equality preserves fuzzy syntax markers."""
+        builder = QueryBuilder()
+        result = builder.build_text_condition("title", "=", "%laptap%")
+
+        assert result == "@title:%laptap%"
 
     def test_text_exact_phrase(self):
         """TEXT field with = preserves multi-word phrase: @field:"exact phrase"."""
@@ -55,12 +76,12 @@ class TestQueryBuilderTextFields:
 
         assert result == r'@title:"say \"hello\""'
 
-    def test_text_exact_phrase_escapes_backslashes(self):
-        """TEXT field with = escapes backslashes inside the value."""
+    def test_text_single_term_equality_escapes_backslashes(self):
+        """Single-term equality still escapes backslashes and other operators."""
         builder = QueryBuilder()
         result = builder.build_text_condition("path", "=", r"c:\users\docs")
 
-        assert result == r'@path:"c:\\users\\docs"'
+        assert result == r"@path:c\:\\users\\docs"
 
     def test_text_fulltext_term(self):
         """TEXT field with FULLTEXT (tokenized search): @field:term."""

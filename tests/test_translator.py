@@ -136,7 +136,7 @@ class TestTranslatorBasicSearch:
         )
 
         assert result.command == "FT.SEARCH"
-        assert result.query_string == '@title:"hello"'
+        assert result.query_string == "@title:hello"
 
     def test_select_with_numeric_filter(self, translator: Translator, basic_index: str):
         """SELECT with NUMERIC field condition."""
@@ -202,7 +202,7 @@ class TestTranslatorBooleanConditions:
             f"SELECT * FROM {basic_index} WHERE title = 'hello' AND price > 50"
         )
 
-        assert '@title:"hello"' in result.query_string
+        assert "@title:hello" in result.query_string
         assert "@price:[(50 +inf]" in result.query_string
 
     def test_or_conditions(self, translator: Translator, basic_index: str):
@@ -219,6 +219,88 @@ class TestTranslatorBooleanConditions:
         """WHERE price = true should raise, not produce @price:[True True]."""
         with pytest.raises(ValueError, match="Boolean value"):
             translator.translate(f"SELECT * FROM {basic_index} WHERE price = true")
+
+
+class TestTranslatorMixedBooleanLogic:
+    """Tests that mixed AND/OR WHERE clauses keep their SQL grouping.
+
+    Regression coverage for the bug where ``A AND (B OR C)`` and similar
+    expressions were flattened to a single boolean operator (e.g.
+    ``@a|@b|@c``), losing the user's intended precedence.
+    """
+
+    def test_and_with_nested_or(self, translator: Translator, basic_index: str):
+        """A AND (B OR C) -> ``@a (B|C)`` and the OR group is parenthesized."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE category = 'a' AND (status = 'b' OR status = 'c')"
+        )
+
+        assert result.query_string == "@category:{a} (@status:{b}|@status:{c})"
+
+    def test_or_with_nested_and(self, translator: Translator, basic_index: str):
+        """A OR (B AND C) -> ``(@a|@b @c)`` with the whole tree wrapped."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE category = 'a' OR (status = 'b' AND price > 50)"
+        )
+
+        assert result.query_string == "(@category:{a}|@status:{b} @price:[(50 +inf])"
+
+    def test_or_group_first_then_and(self, translator: Translator, basic_index: str):
+        """(B OR C) AND A -> ``(@b|@c) @a`` keeps the leading OR group."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE (status = 'b' OR status = 'c') AND category = 'a'"
+        )
+
+        assert result.query_string == "(@status:{b}|@status:{c}) @category:{a}"
+
+    def test_chained_ands_with_trailing_or_group(
+        self, translator: Translator, basic_index: str
+    ):
+        """A AND B AND C AND (D OR E) keeps the OR group only around D|E."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE category = 'a' AND status = 'b' AND price > 10 "
+            "AND (title = 'd' OR title = 'e')"
+        )
+
+        assert (
+            result.query_string
+            == "@category:{a} @status:{b} @price:[(10 +inf] (@title:d|@title:e)"
+        )
+
+    def test_two_or_groups_anded(self, translator: Translator, basic_index: str):
+        """(A OR B) AND (C OR D) keeps both OR groups parenthesized."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE (category = 'a' OR category = 'b') "
+            "AND (status = 'c' OR status = 'd')"
+        )
+
+        assert (
+            result.query_string
+            == "(@category:{a}|@category:{b}) (@status:{c}|@status:{d})"
+        )
+
+    def test_pure_and_chain_unchanged(self, translator: Translator, basic_index: str):
+        """A AND B AND C still renders as space-joined without parens."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE category = 'a' "
+            "AND status = 'b' AND price > 10"
+        )
+
+        assert result.query_string == "@category:{a} @status:{b} @price:[(10 +inf]"
+
+    def test_pure_or_chain_unchanged(self, translator: Translator, basic_index: str):
+        """A OR B OR C still renders as a single pipe-joined OR group."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} "
+            "WHERE category = 'a' OR category = 'b' OR category = 'c'"
+        )
+
+        assert result.query_string == "(@category:{a}|@category:{b}|@category:{c})"
 
 
 class TestTranslatorAggregate:
@@ -344,6 +426,71 @@ class TestTranslatorAggregate:
         assert "AS" in args
         assert "unique_titles" in args
 
+    def test_sql_count_distinct_routes_to_count_distinct(
+        self, translator: Translator, basic_index: str
+    ):
+        """SQL COUNT(DISTINCT x) emits REDUCE COUNT_DISTINCT 1 @x, not COUNT 0."""
+        result = translator.translate(
+            f"SELECT category, COUNT(DISTINCT title) AS unique_titles "
+            f"FROM {basic_index} GROUP BY category"
+        )
+
+        assert result.command == "FT.AGGREGATE"
+        args = result.args
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "COUNT_DISTINCT"
+        assert args[reduce_idx + 2] == "1"
+        assert args[reduce_idx + 3] == "@title"
+        assert args[reduce_idx + 4] == "AS"
+        assert args[reduce_idx + 5] == "unique_titles"
+
+    def test_sql_count_distinct_global_aggregation(
+        self, translator: Translator, basic_index: str
+    ):
+        """Global COUNT(DISTINCT x) (no GROUP BY) still emits COUNT_DISTINCT."""
+        result = translator.translate(
+            f"SELECT COUNT(DISTINCT title) AS n FROM {basic_index}"
+        )
+
+        assert result.command == "FT.AGGREGATE"
+        args = result.args
+        # GROUPBY 0 for global aggregation
+        groupby_idx = args.index("GROUPBY")
+        assert args[groupby_idx + 1] == "0"
+        reduce_idx = args.index("REDUCE")
+        assert args[reduce_idx + 1] == "COUNT_DISTINCT"
+        assert args[reduce_idx + 2] == "1"
+        assert args[reduce_idx + 3] == "@title"
+
+    def test_sql_count_distinct_matches_count_distinct_function(
+        self, translator: Translator, basic_index: str
+    ):
+        """COUNT(DISTINCT x) and COUNT_DISTINCT(x) emit equivalent reducers."""
+        sql_distinct = translator.translate(
+            f"SELECT category, COUNT(DISTINCT title) AS n "
+            f"FROM {basic_index} GROUP BY category"
+        )
+        redis_distinct = translator.translate(
+            f"SELECT category, COUNT_DISTINCT(title) AS n "
+            f"FROM {basic_index} GROUP BY category"
+        )
+
+        assert sql_distinct.args == redis_distinct.args
+
+    def test_sql_sum_distinct_raises(self, translator: Translator, basic_index: str):
+        """SUM(DISTINCT x) is rejected — no native RediSearch equivalent."""
+        with pytest.raises(ValueError, match="DISTINCT"):
+            translator.translate(f"SELECT SUM(DISTINCT price) FROM {basic_index}")
+
+    def test_sql_count_distinct_multi_column_raises(
+        self, translator: Translator, basic_index: str
+    ):
+        """COUNT(DISTINCT a, b) is rejected — multi-column DISTINCT unsupported."""
+        with pytest.raises(ValueError, match="single column"):
+            translator.translate(
+                f"SELECT COUNT(DISTINCT title, category) FROM {basic_index}"
+            )
+
     def test_quantile_reducer(self, translator: Translator, basic_index: str):
         """QUANTILE(field, value) should generate REDUCE QUANTILE 2 @field value."""
         result = translator.translate(
@@ -429,7 +576,7 @@ class TestTranslatorNegation:
             f"SELECT * FROM {basic_index} WHERE NOT title != 'good'"
         )
 
-        assert result.query_string == '@title:"good"'
+        assert result.query_string == "@title:good"
 
 
 class TestTranslatorOutput:
