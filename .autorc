@@ -1,7 +1,6 @@
 {
   "plugins": [
     "git-tag",
-    "all-contributors",
     "conventional-commits",
     "released"
   ],
@@ -77,14 +76,6 @@
       "description": "Update one or more dependencies version",
       "releaseType": "none",
       "color": "#8732bc",
-      "overwrite": true
-    },
-    {
-      "name": "auto:performance",
-      "changelogTitle": "🏎 Performance",
-      "description": "Improve performance of an existing feature",
-      "releaseType": "patch",
-      "color": "#f4b2d8",
       "overwrite": true
     },
     {
