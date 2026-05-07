@@ -1,0 +1,51 @@
+# sql-redis
+
+> Experimental SQL to Redis FT.SEARCH and FT.AGGREGATE translator. Accepts a SQL SELECT string, looks up index schemas via FT.INFO, emits the matching Redis search command, parses the reply into rows.
+
+For agents using the library, read [AGENTS.md](../AGENTS.md) first. For the full API surface, read [docs/api/](api/). For task-oriented recipes, read [docs/user_guide/how_to_guides/](user_guide/how_to_guides/).
+
+## Concepts
+
+- [Architecture](concepts/architecture.md): The two top-level objects (Executor, SchemaRegistry) and the layered translator they contain.
+- [Why SQL?](concepts/why-sql.md): Interface choice. SQL versus pandas-style DSL versus a builder API.
+- [Why sqlglot?](concepts/why-sqlglot.md): Parser choice. sqlglot versus a hand-rolled recursive-descent parser.
+- [Schema-aware translation](concepts/schema-aware-translation.md): Why field types matter, how the registry caches them, lazy versus eager loading, async coalescing.
+- [FT.SEARCH versus FT.AGGREGATE](concepts/search-vs-aggregate.md): Which Redis command runs for a given SQL, which feature combinations are illegal, and why.
+- [Parameter substitution](concepts/parameter-substitution.md): The token-based substitution algorithm, the two bugs it fixes, and why it is not parser-based.
+- [Vector substitution](concepts/vector-substitution.md): Why bytes parameters take a different path. Two-stage substitution that keeps vectors out of the SQL string.
+- [Async invariants](concepts/async-invariants.md): The three guarantees the async path provides: coalesced loads, shielded reads, invalidate cancels in-flight.
+- [Result shape](concepts/result-shape.md): What QueryResult.rows actually contains, why it varies with the command, scoring, and client decoding.
+- [Testing philosophy](concepts/testing-philosophy.md): TDD, 100% coverage, why integration tests use real Redis instead of mocks.
+
+## User guide
+
+- [Installation](user_guide/installation.md): pip install, Redis container setup, optional development setup.
+- [Getting started](user_guide/getting-started.md): End-to-end first query in five minutes. Index creation through result iteration with expected output.
+
+## How-to guides
+
+- [Use parameters](user_guide/how_to_guides/use-parameters.md): Token-based substitution rules, type handling, vector bytes.
+- [Vector and hybrid search](user_guide/how_to_guides/vector-search.md): KNN, filter-then-vector, scoring.
+- [Full-text search](user_guide/how_to_guides/text-search.md): Phrase, tokenized AND, OR, fuzzy, prefix/suffix/contains, proximity, optional terms, scoring, stopwords.
+- [GEO queries](user_guide/how_to_guides/geo-queries.md): POINT(lon, lat), units, all operators, distance in SELECT.
+- [Date queries](user_guide/how_to_guides/date-queries.md): ISO 8601 literal conversion, YEAR/MONTH/DAY functions, limitations.
+- [Missing fields](user_guide/how_to_guides/missing-fields.md): IS NULL / IS NOT NULL (Redis 7.4+, INDEXMISSING) and the exists() function.
+- [Lazy versus eager schemas](user_guide/how_to_guides/lazy-vs-eager-schemas.md): SchemaCacheStrategy choices, invalidation, polling for index changes.
+- [Async usage](user_guide/how_to_guides/async-usage.md): AsyncExecutor, AsyncSchemaRegistry.ensure_schema, cancellation safety.
+
+## API reference
+
+- [Translator](api/translator.rst): Translator and TranslatedQuery. Turns SQL strings into Redis command lists without executing.
+- [Schema registries](api/schema.rst): SchemaRegistry (sync) and AsyncSchemaRegistry. Caches FT.INFO output; supports lazy load, invalidation, change polling.
+- [Executor](api/executor.rst): Executor, AsyncExecutor, create_executor, create_async_executor, QueryResult, SchemaCacheStrategy, __version__.
+- [SQL syntax catalog](api/sql-syntax.md): Every supported clause, operator, and function with its RediSearch translation.
+
+## Examples
+
+- [Examples index](examples/index.md): Pointers to applied scenarios in the how-to guides.
+
+## For agents modifying sql-redis
+
+- [Repository map](for-ais-only/REPOSITORY_MAP.md): Module-by-module description of the source tree.
+- [Build and test](for-ais-only/BUILD_AND_TEST.md): Make targets, test layout, coverage policy.
+- [Failure modes](for-ais-only/FAILURE_MODES.md): Things that look like bugs but are intentional design choices.

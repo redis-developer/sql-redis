@@ -29,6 +29,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/redis-developer/sql-redis"
 Repository = "https://github.com/redis-developer/sql-redis"
+Documentation = "https://docs.redisvl.com/projects/sql-redis/"
 
 [build-system]
 requires = ["hatchling"]
@@ -45,6 +46,13 @@ dev = [
     "pre-commit>=4.1.0,<5",
     "codespell>=2.4.1,<3",
     "testcontainers[redis]>=4.0.0,<5",
+]
+docs = [
+    "sphinx>=7.3,<9",
+    "sphinx-book-theme>=1.1",
+    "sphinx-design>=0.6",
+    "sphinx-copybutton>=0.5",
+    "myst-parser>=3.0",
 ]
 
 [tool.uv]

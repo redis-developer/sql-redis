@@ -1,4 +1,4 @@
-.PHONY: install format lint test clean check-types check-format check-sort-imports sort-imports build help
+.PHONY: install format lint test clean check-types check-format check-sort-imports sort-imports build docs-build docs-serve help
 .DEFAULT_GOAL := help
 
 # Allow passing arguments to make targets (e.g., make test ARGS="...")
@@ -48,6 +48,15 @@ check: lint test ## Run all checks (lint + test)
 build: ## Build wheel and source distribution
 	@echo "🏗️ Building distribution packages"
 	uv build
+
+docs-build: ## Build documentation
+	@echo "📚 Building documentation"
+	uv run --group docs make -C docs html
+
+docs-serve: ## Serve documentation locally at http://localhost:8000
+	@echo "🌐 Serving documentation at http://localhost:8000"
+	@echo "📁 Make sure docs are built first with 'make docs-build'"
+	uv run python -m http.server --directory docs/_build/html
 
 clean: ## Clean up build artifacts and caches
 	@echo "🧹 Cleaning up directory"
