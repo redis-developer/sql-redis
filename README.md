@@ -6,7 +6,9 @@ A SQL-to-Redis translator that converts SQL `SELECT` statements into Redis `FT.S
 
 > **Status: Experimental.** sql-redis is in the [Redis AI Hub](https://redis.io/ai-hub/) under the Experimental tier. The API can change between minor releases. Not yet production-ready; we are validating the design and the SQL surface in real use.
 
-A Diataxis-aligned documentation site (concepts, how-to guides, API reference, examples) lives in [`docs/`](docs/) and will be published at **docs.redisvl.com/projects/sql-redis/** once the hub site is live. Until then, this README is the canonical reference. Build the site locally with:
+Full documentation: **<https://redis-developer.github.io/sql-redis/>** (Diataxis-aligned: concepts, how-to guides, API reference, examples). Built with MkDocs Material from [`docs/`](docs/) and deployed to GitHub Pages on every push to `main`.
+
+Build the site locally:
 
 ```bash
 uv sync --group docs
@@ -428,7 +430,7 @@ Each layer has focused unit tests; 100% coverage is achievable because responsib
 ## For AI agents
 
 - **[`AGENTS.md`](AGENTS.md):** how to use sql-redis from an agent, including gotchas and the error model.
-- **`llms.txt`:** auto-generated at docs-build time (`make docs-build` → `site/llms.txt`). A flat index of every doc page with one-line summaries; it will live at `docs.redisvl.com/projects/sql-redis/llms.txt` once published.
+- **[`llms.txt`](https://redis-developer.github.io/sql-redis/llms.txt):** auto-generated flat index of every doc page with one-line summaries (built by `mkdocs-llmstxt`).
 - **[`docs/for-ais-only/`](docs/for-ais-only/):** repository map, build and test guide, and intentional failure modes for agents modifying the library.
 
 ## Development
