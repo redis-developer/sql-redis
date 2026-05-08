@@ -1,17 +1,18 @@
-# sql-redis
+<div align="center">
+    <img width="300" src="https://raw.githubusercontent.com/redis/redis-vl-python/main/docs/_static/Redis_Logo_Red_RGB.svg" alt="Redis">
+    <h1>sql-redis</h1>
+    <p><strong>SQL on top of RediSearch and RedisVL indexes</strong></p>
+</div>
 
-[![Status: Experimental](https://img.shields.io/badge/status-experimental-orange)](https://redis.io/ai-hub/)
+<div align="center">
+
+**[Documentation](https://redis-developer.github.io/sql-redis/)** • **[GitHub](https://github.com/redis-developer/sql-redis)** • **[PyPI](https://pypi.org/project/sql-redis/)**
+
+</div>
+
+---
 
 A SQL-to-Redis translator that converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands. Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes.
-
-> **Status: Experimental.** sql-redis is in the [Redis AI Hub](https://redis.io/ai-hub/) under the Experimental tier. The API can change between minor releases. Not yet production-ready; we are validating the design and the SQL surface in real use.
-
-A Diataxis-aligned documentation site (concepts, how-to guides, API reference, examples) lives in [`docs/`](docs/) and will be published at **docs.redisvl.com/projects/sql-redis/** once the hub site is live. Until then, this README is the canonical reference. Build the site locally with:
-
-```bash
-uv sync --group docs
-make docs-serve   # http://localhost:8000
-```
 
 ## Install
 
@@ -428,7 +429,7 @@ Each layer has focused unit tests; 100% coverage is achievable because responsib
 ## For AI agents
 
 - **[`AGENTS.md`](AGENTS.md):** how to use sql-redis from an agent, including gotchas and the error model.
-- **`llms.txt`:** auto-generated at docs-build time (`make docs-build` → `site/llms.txt`). A flat index of every doc page with one-line summaries; it will live at `docs.redisvl.com/projects/sql-redis/llms.txt` once published.
+- **[`llms.txt`](https://redis-developer.github.io/sql-redis/llms.txt):** auto-generated flat index of every doc page with one-line summaries (built by `mkdocs-llmstxt`).
 - **[`docs/for-ais-only/`](docs/for-ais-only/):** repository map, build and test guide, and intentional failure modes for agents modifying the library.
 
 ## Development
@@ -438,6 +439,7 @@ make install       # uv sync --all-extras
 make test          # requires Docker for testcontainers
 make test-cov      # with coverage report
 make lint          # format + mypy
+make docs-serve    # uv sync --group docs && preview at http://localhost:8000
 ```
 
 ## Testing philosophy
