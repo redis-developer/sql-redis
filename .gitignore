@@ -54,7 +54,8 @@ Thumbs.db
 .ai/
 nitin_docs/
 
-# Sphinx build output
+# MkDocs build output
+site/
 docs/_build/
 
 

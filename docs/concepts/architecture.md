@@ -49,10 +49,10 @@ QueryResult (rows, count)
 ```
 
 - **`SQLParser`** wraps sqlglot. Pure: no Redis dependency. Output is a `ParsedQuery`, the library's own dataclass.
-- **`Analyzer`** decides how each `WHERE` condition will translate, based on the underlying field's type. This is the only place the schema registry is consulted during translation. See {doc}`schema-aware-translation` for why this lookup is necessary.
+- **`Analyzer`** decides how each `WHERE` condition will translate, based on the underlying field's type. This is the only place the schema registry is consulted during translation. See [Schema-aware translation](schema-aware-translation.md) for why this lookup is necessary.
 - **`QueryBuilder`** is stateless. Given a tagged condition, it knows how to emit `@field:term`, `@field:[min max]`, `@field:{value}`, and so on.
-- **`Translator`** is the orchestrator. It calls parse, analyze, build in order and packages the result into a `TranslatedQuery`. It also decides whether the final command is `FT.SEARCH` or `FT.AGGREGATE` (see {doc}`search-vs-aggregate`).
-- **`Executor`** is the only layer that talks to Redis at query time. It substitutes parameters ({doc}`parameter-substitution`), sends the command, parses the reply into rows ({doc}`result-shape`).
+- **`Translator`** is the orchestrator. It calls parse, analyze, build in order and packages the result into a `TranslatedQuery`. It also decides whether the final command is `FT.SEARCH` or `FT.AGGREGATE` (see [FT.SEARCH vs FT.AGGREGATE](search-vs-aggregate.md)).
+- **`Executor`** is the only layer that talks to Redis at query time. It substitutes parameters ([Parameter substitution](parameter-substitution.md)), sends the command, parses the reply into rows ([Result shape](result-shape.md)).
 
 ## Why this layering exists
 

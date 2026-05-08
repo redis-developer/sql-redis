@@ -4,7 +4,7 @@ Every `Executor.execute()` call returns a `QueryResult` with two attributes: `ro
 
 ## What `count` means
 
-The integer in `count` is what Redis returned at position 0 of the reply. Its meaning depends on which command ran (see {doc}`search-vs-aggregate`):
+The integer in `count` is what Redis returned at position 0 of the reply. Its meaning depends on which command ran (see [FT.SEARCH vs FT.AGGREGATE](search-vs-aggregate.md)):
 
 - **`FT.SEARCH`** (no aggregation): `count` is the **total number of matching documents** in the index, regardless of `LIMIT`. So `count` can be much larger than `len(rows)`. This is useful for pagination.
 - **`FT.AGGREGATE`** (any aggregation, GROUP BY, computed field, date function): `count` is the **number of rows in the reply**, which is what you got back. After `LIMIT`, the two are equal.

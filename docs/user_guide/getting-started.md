@@ -6,7 +6,7 @@ By the end of this walkthrough you will have run a SQL `SELECT` against a Redis 
 
 Before you start, confirm both:
 
-- Redis 8.x is running locally on port 6379. See {doc}`installation`.
+- Redis 8.x is running locally on port 6379. See [Installation](installation.md).
 - `sql-redis` is installed in the current Python environment (`pip install sql-redis`).
 
 If both are true, the following Python snippet should print a version string:
@@ -90,9 +90,9 @@ You created an index, loaded data, ran a SQL query, and got rows back. Everythin
 
 ## Where next
 
-- Inject runtime values into a query: {doc}`how_to_guides/use-parameters`.
-- Search a `TEXT` field beyond simple equality: {doc}`how_to_guides/text-search`.
-- Find the K most similar items to a query embedding: {doc}`how_to_guides/vector-search`.
-- Filter by geographic distance: {doc}`how_to_guides/geo-queries`.
-- Use the async API: {doc}`how_to_guides/async-usage`.
-- The full SQL surface: {doc}`/api/sql-syntax`.
+- Inject runtime values into a query: [Use parameters](how_to_guides/use-parameters.md).
+- Search a `TEXT` field beyond simple equality: [Text search](how_to_guides/text-search.md).
+- Find the K most similar items to a query embedding: [Vector search](how_to_guides/vector-search.md).
+- Filter by geographic distance: [GEO queries](how_to_guides/geo-queries.md).
+- Use the async API: [Async usage](how_to_guides/async-usage.md).
+- The full SQL surface: [SQL Syntax](../api/sql-syntax.md).

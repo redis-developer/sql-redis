@@ -11,7 +11,7 @@ of them.
 The fix at the call site is to construct `Redis(decode_responses=True)`. Do
 not "fix" this in `executor.py` by force-decoding; that breaks users who
 deliberately want bytes (binary fields, vectors). See
-{doc}`/concepts/result-shape` for the full story.
+[Result shape](../concepts/result-shape.md) for the full story.
 
 ## Stopwords are silently stripped
 
@@ -59,7 +59,7 @@ post-invalidate stale write into the cache. The shielded `await` in
 `ensure_schema()` returns the current cache state when the underlying task
 is cancelled, so other awaiters do not propagate `CancelledError`. If you
 "simplify" by removing the shield, you reintroduce a race. See
-{doc}`/concepts/async-invariants`.
+[Async invariants](../concepts/async-invariants.md).
 
 ## Lazy schema-load failures are deferred
 
@@ -74,7 +74,7 @@ This is not a bug. `score()` requires `WITHSCORES`, which is `FT.SEARCH`
 only. Anything that forces `FT.AGGREGATE` (aggregations, GROUP BY, computed
 fields, date functions, geo > / >= / BETWEEN, HAVING) cannot coexist with
 `score()`. The translator surfaces the conflict explicitly rather than
-silently dropping one side. See {doc}`/concepts/search-vs-aggregate`.
+silently dropping one side. See [FT.SEARCH vs FT.AGGREGATE](../concepts/search-vs-aggregate.md).
 
 ## `OR` plus geo > / >= / BETWEEN raises ValueError
 
@@ -87,4 +87,4 @@ date-function predicates combined with `OR`.
 
 If CI reports coverage below 100%, do not retry. The failure is real. Either
 add a test or delete the unreachable branch. The project explicitly forbids
-`# pragma: no cover` (see {doc}`/concepts/testing-philosophy`).
+`# pragma: no cover` (see [Testing philosophy](../concepts/testing-philosophy.md)).

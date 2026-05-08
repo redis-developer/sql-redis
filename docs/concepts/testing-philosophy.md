@@ -17,6 +17,6 @@ Integration tests use `testcontainers[redis]` to start a real Redis with the sea
 
 ## Why 100% coverage is achievable here
 
-Because the layers are decoupled (see {doc}`architecture`), each component has a clear contract and a small surface. There are no untestable branches because there are no hidden dependencies.
+Because the layers are decoupled (see [Architecture](architecture.md)), each component has a clear contract and a small surface. There are no untestable branches because there are no hidden dependencies.
 
 Coverage is enforced in CI.

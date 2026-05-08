@@ -62,4 +62,4 @@ The `bytes` value is intentionally not stringified into the SQL. The executor in
 
 ## See also
 
-- {doc}`/concepts/parameter-substitution` for why the substitution is token-based.
+- [Parameter substitution](../../concepts/parameter-substitution.md) for why the substitution is token-based.

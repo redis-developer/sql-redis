@@ -38,7 +38,7 @@ These constraints are not bugs to fix; they are the cost of the abstraction. The
 
 Two practical consequences:
 
-1. **The result-row shape changes.** `FT.SEARCH` returns rows with field-value pairs straight from the indexed documents, possibly with a score column. `FT.AGGREGATE` returns rows of computed fields, group keys, and reduced values; the original document fields are present only if the SQL asks for them. See {doc}`result-shape`.
+1. **The result-row shape changes.** `FT.SEARCH` returns rows with field-value pairs straight from the indexed documents, possibly with a score column. `FT.AGGREGATE` returns rows of computed fields, group keys, and reduced values; the original document fields are present only if the SQL asks for them. See [Result shape](result-shape.md).
 2. **`LIMIT` semantics differ subtly.** Both commands honour `LIMIT`, but the `count` returned by `FT.AGGREGATE` reflects the post-pipeline row count, while `FT.SEARCH`'s `count` is the total match count regardless of the limit. The library exposes both as `QueryResult.count`; the meaning depends on which path ran.
 
 If you need to know which command was issued for a given SQL, call `Translator.translate(sql)` directly and inspect `TranslatedQuery.command`.

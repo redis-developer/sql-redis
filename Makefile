@@ -51,12 +51,11 @@ build: ## Build wheel and source distribution
 
 docs-build: ## Build documentation
 	@echo "📚 Building documentation"
-	uv run --group docs make -C docs html
+	DISABLE_MKDOCS_2_WARNING=true uv run --group docs mkdocs build --strict
 
 docs-serve: ## Serve documentation locally at http://localhost:8000
 	@echo "🌐 Serving documentation at http://localhost:8000"
-	@echo "📁 Make sure docs are built first with 'make docs-build'"
-	uv run python -m http.server --directory docs/_build/html
+	DISABLE_MKDOCS_2_WARNING=true uv run --group docs mkdocs serve --dev-addr 127.0.0.1:8000
 
 clean: ## Clean up build artifacts and caches
 	@echo "🧹 Cleaning up directory"
@@ -69,6 +68,7 @@ clean: ## Clean up build artifacts and caches
 	find . -type d -name "build" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.log" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf site
 
 help: ## Show this help message
 	@echo "Available commands:"

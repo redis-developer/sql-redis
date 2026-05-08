@@ -1,36 +1,31 @@
 # Examples
 
-Worked examples and applied patterns built on the sql-redis primitives. The how-to guides under {doc}`/user_guide/how_to_guides/index` are the current source of runnable examples; this section will grow as more end-to-end scenarios are added.
+Worked examples and applied patterns built on the sql-redis primitives. The how-to guides under [How-To Guides](../user_guide/how_to_guides/index.md) are the current source of runnable examples; this section will grow as more end-to-end scenarios are added.
 
-::::{grid} 2
-:gutter: 3
+<div class="grid cards" markdown>
 
-:::{grid-item-card} 🔍 Full-text search
-:link: /user_guide/how_to_guides/text-search
-:link-type: doc
+-   :material-magnify:{ .lg .middle } **[Full-text search](../user_guide/how_to_guides/text-search.md)**
 
-Phrase, fuzzy, proximity, BM25.
-:::
+    ---
 
-:::{grid-item-card} 🧮 Vector and hybrid search
-:link: /user_guide/how_to_guides/vector-search
-:link-type: doc
+    Phrase, fuzzy, proximity, BM25.
 
-KNN, filter-then-vector.
-:::
+-   :material-vector-square:{ .lg .middle } **[Vector and hybrid search](../user_guide/how_to_guides/vector-search.md)**
 
-:::{grid-item-card} 🌍 GEO queries
-:link: /user_guide/how_to_guides/geo-queries
-:link-type: doc
+    ---
 
-POINT, units, operators.
-:::
+    KNN, filter-then-vector.
 
-:::{grid-item-card} 📅 Date queries
-:link: /user_guide/how_to_guides/date-queries
-:link-type: doc
+-   :material-earth:{ .lg .middle } **[GEO queries](../user_guide/how_to_guides/geo-queries.md)**
 
-ISO literals and date functions.
-:::
+    ---
 
-::::
+    POINT, units, operators.
+
+-   :material-calendar:{ .lg .middle } **[Date queries](../user_guide/how_to_guides/date-queries.md)**
+
+    ---
+
+    ISO literals and date functions.
+
+</div>

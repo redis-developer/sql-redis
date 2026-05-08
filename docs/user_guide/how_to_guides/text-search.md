@@ -2,7 +2,7 @@
 
 You want to search a `TEXT` field beyond simple equality. Each section below answers one task.
 
-For the complete catalog of supported modes and their RediSearch translation, see {doc}`/api/sql-syntax`.
+For the complete catalog of supported modes and their RediSearch translation, see the [SQL Syntax reference](../../api/sql-syntax.md).
 
 ## Match an exact phrase
 
@@ -132,7 +132,7 @@ for row in result.rows:
     print(row[b"title"], row[b"relevance"])
 ```
 
-`score()` triggers `WITHSCORES` in the underlying `FT.SEARCH`. The score is BM25 by default. The result-row shape changes when scoring is enabled; see {doc}`/concepts/result-shape`.
+`score()` triggers `WITHSCORES` in the underlying `FT.SEARCH`. The score is BM25 by default. The result-row shape changes when scoring is enabled; see [Result shape](../../concepts/result-shape.md).
 
 ## Keep stopwords in matches
 

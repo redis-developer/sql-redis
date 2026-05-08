@@ -1,101 +1,71 @@
 ---
-myst:
-  html_meta:
-    "description lang=en": |
-      Concepts behind sql-redis. Architecture and design decisions.
+description: Concepts behind sql-redis. Architecture and design decisions.
 ---
 
 # Concepts
 
 Foundational reading for sql-redis. Each page explains a single design choice or sub-system, with enough context to make informed extensions or contributions.
 
-::::{grid} 2
-:gutter: 3
+<div class="grid cards" markdown>
 
-:::{grid-item-card} 🏗️ Architecture
-:link: architecture
-:link-type: doc
+-   :material-sitemap:{ .lg .middle } **[Architecture](architecture.md)**
 
-The two top-level objects (Executor, SchemaRegistry) and the layered translator they contain.
-:::
+    ---
 
-:::{grid-item-card} 🤔 Why SQL?
-:link: why-sql
-:link-type: doc
+    The two top-level objects (Executor, SchemaRegistry) and the layered translator they contain.
 
-The interface choice. SQL versus a pandas-style DSL versus a builder API.
-:::
+-   :material-help-circle:{ .lg .middle } **[Why SQL?](why-sql.md)**
 
-:::{grid-item-card} 🪛 Why sqlglot?
-:link: why-sqlglot
-:link-type: doc
+    ---
 
-The parser choice. sqlglot versus a hand-rolled recursive-descent parser.
-:::
+    The interface choice. SQL versus a pandas-style DSL versus a builder API.
 
-:::{grid-item-card} 🗂️ Schema-aware translation
-:link: schema-aware-translation
-:link-type: doc
+-   :material-tools:{ .lg .middle } **[Why sqlglot?](why-sqlglot.md)**
 
-Why field types matter, how the schema registry caches them, lazy versus eager loading.
-:::
+    ---
 
-:::{grid-item-card} 🔀 FT.SEARCH vs FT.AGGREGATE
-:link: search-vs-aggregate
-:link-type: doc
+    The parser choice. sqlglot versus a hand-rolled recursive-descent parser.
 
-Which Redis command runs for a given SQL, why the choice is forced, and which feature combinations are illegal.
-:::
+-   :material-folder-table:{ .lg .middle } **[Schema-aware translation](schema-aware-translation.md)**
 
-:::{grid-item-card} 🔣 Parameter substitution
-:link: parameter-substitution
-:link-type: doc
+    ---
 
-The token-based substitution algorithm and the bugs it fixes.
-:::
+    Why field types matter, how the schema registry caches them, lazy versus eager loading.
 
-:::{grid-item-card} 🧬 Vector substitution
-:link: vector-substitution
-:link-type: doc
+-   :material-source-branch:{ .lg .middle } **[FT.SEARCH vs FT.AGGREGATE](search-vs-aggregate.md)**
 
-Why bytes parameters take a different path: two-stage substitution that keeps vectors out of the SQL string.
-:::
+    ---
 
-:::{grid-item-card} 🔁 Async invariants
-:link: async-invariants
-:link-type: doc
+    Which Redis command runs for a given SQL, why the choice is forced, and which feature combinations are illegal.
 
-Coalesced FT.INFO loads, shielded reads, invalidate-cancels-in-flight. The three guarantees the async path provides.
-:::
+-   :material-variable:{ .lg .middle } **[Parameter substitution](parameter-substitution.md)**
 
-:::{grid-item-card} 📋 Result shape
-:link: result-shape
-:link-type: doc
+    ---
 
-What QueryResult.rows actually contains, why it varies with the command, scoring, and client decoding.
-:::
+    The token-based substitution algorithm and the bugs it fixes.
 
-:::{grid-item-card} 🧪 Testing philosophy
-:link: testing-philosophy
-:link-type: doc
+-   :material-dna:{ .lg .middle } **[Vector substitution](vector-substitution.md)**
 
-TDD, 100% coverage, and why integration tests do not mock Redis.
-:::
+    ---
 
-::::
+    Why bytes parameters take a different path: two-stage substitution that keeps vectors out of the SQL string.
 
-```{toctree}
-:maxdepth: 2
-:hidden:
+-   :material-sync:{ .lg .middle } **[Async invariants](async-invariants.md)**
 
-architecture
-why-sql
-why-sqlglot
-schema-aware-translation
-search-vs-aggregate
-parameter-substitution
-vector-substitution
-async-invariants
-result-shape
-testing-philosophy
-```
+    ---
+
+    Coalesced FT.INFO loads, shielded reads, invalidate-cancels-in-flight. The three guarantees the async path provides.
+
+-   :material-format-list-bulleted:{ .lg .middle } **[Result shape](result-shape.md)**
+
+    ---
+
+    What `QueryResult.rows` actually contains, why it varies with the command, scoring, and client decoding.
+
+-   :material-test-tube:{ .lg .middle } **[Testing philosophy](testing-philosophy.md)**
+
+    ---
+
+    TDD, 100% coverage, and why integration tests do not mock Redis.
+
+</div>
