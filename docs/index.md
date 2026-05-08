@@ -4,13 +4,6 @@ description: sql-redis documentation. SQL to Redis FT.SEARCH and FT.AGGREGATE tr
 
 # sql-redis
 
-!!! warning "Status: Experimental"
-
-    sql-redis is part of the [Redis AI Hub](https://redis.io/ai-hub/) under the
-    **Experimental** tier. The Python API can change between minor releases. The
-    project is validating its design and SQL surface in real use; we welcome bug
-    reports and feedback at the [issue tracker](https://github.com/redis-developer/sql-redis/issues).
-
 Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes. sql-redis converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands, looking up index schemas via `FT.INFO` so the translation respects the underlying field types.
 
 ## Quick Start
