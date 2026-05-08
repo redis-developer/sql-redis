@@ -1,0 +1,202 @@
+site_name: sql-redis
+site_description: SQL to Redis FT.SEARCH and FT.AGGREGATE translator.
+site_url: https://docs.redisvl.com/projects/sql-redis/
+repo_url: https://github.com/redis-developer/sql-redis
+repo_name: redis-developer/sql-redis
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Redis Inc.
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+    - content.tooltips
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+extra:
+  status:
+    experimental: Experimental
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/redis-developer/sql-redis
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/sql-redis/
+
+extra_css:
+  - stylesheets/redis-ai-hub-header.css
+
+extra_javascript:
+  - javascripts/redis-ai-hub-header.js
+
+plugins:
+  - search
+  - autorefs
+  - section-index
+  - git-revision-date-localized:
+      enable_creation_date: false
+      type: timeago
+      fallback_to_build_date: true
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            docstring_section_style: table
+            inherited_members: true
+            filters:
+              - "!^_"
+  - llmstxt:
+      full_output: llms-full.txt
+      sections:
+        Concepts:
+          - concepts/*.md
+        User Guide:
+          - user_guide/*.md
+          - user_guide/how_to_guides/*.md
+        API Reference:
+          - api/*.md
+        For AI Agents:
+          - for-ais-only/*.md
+  - redirects:
+      redirect_maps: {}
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+watch:
+  - sql_redis
+  - AGENTS.md
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - concepts/index.md
+      - Architecture: concepts/architecture.md
+      - Why SQL?: concepts/why-sql.md
+      - Why sqlglot?: concepts/why-sqlglot.md
+      - Schema-aware translation: concepts/schema-aware-translation.md
+      - FT.SEARCH vs FT.AGGREGATE: concepts/search-vs-aggregate.md
+      - Parameter substitution: concepts/parameter-substitution.md
+      - Vector substitution: concepts/vector-substitution.md
+      - Async invariants: concepts/async-invariants.md
+      - Result shape: concepts/result-shape.md
+      - Testing philosophy: concepts/testing-philosophy.md
+  - User Guide:
+      - user_guide/index.md
+      - Installation: user_guide/installation.md
+      - Getting Started: user_guide/getting-started.md
+      - How-To Guides:
+          - user_guide/how_to_guides/index.md
+          - Use parameters: user_guide/how_to_guides/use-parameters.md
+          - Vector search: user_guide/how_to_guides/vector-search.md
+          - Text search: user_guide/how_to_guides/text-search.md
+          - GEO queries: user_guide/how_to_guides/geo-queries.md
+          - Date queries: user_guide/how_to_guides/date-queries.md
+          - Missing fields: user_guide/how_to_guides/missing-fields.md
+          - Lazy vs eager schemas: user_guide/how_to_guides/lazy-vs-eager-schemas.md
+          - Async usage: user_guide/how_to_guides/async-usage.md
+  - Examples: examples/index.md
+  - API Reference:
+      - api/index.md
+      - Translator: api/translator.md
+      - Schema: api/schema.md
+      - Executor: api/executor.md
+      - SQL Syntax: api/sql-syntax.md
+  - For AI Agents:
+      - for-ais-only/index.md
+      - Repository map: for-ais-only/REPOSITORY_MAP.md
+      - Build and test: for-ais-only/BUILD_AND_TEST.md
+      - Failure modes: for-ais-only/FAILURE_MODES.md
+  - Changelog: https://github.com/redis-developer/sql-redis/releases

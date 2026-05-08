@@ -96,7 +96,7 @@ Full reference, generated from docstrings, is at `docs/api/`.
 
 | Artifact | Purpose |
 |---|---|
-| [`docs/llms.txt`](docs/llms.txt) | Flat index of every doc page with one-line summaries. Cheap to grep, good for in-context injection. |
+| [`llms.txt`](https://docs.redisvl.com/projects/sql-redis/llms.txt) | Auto-generated flat index of every doc page with one-line summaries. Built by `mkdocs-llmstxt` at deploy time. Good for in-context injection. |
 | [`docs/api/`](docs/api/) | Sphinx `autoclass` reference for every public symbol. Source of truth for method signatures. |
 | [`docs/user_guide/how_to_guides/`](docs/user_guide/how_to_guides/) | Task-oriented recipes (vector search, GEO, dates, async, parameters). |
 | [`docs/concepts/`](docs/concepts/) | Why-style explanation: architecture, parameter substitution, schema-aware translation. |

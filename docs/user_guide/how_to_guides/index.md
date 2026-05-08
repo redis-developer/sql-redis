@@ -1,16 +1,12 @@
 # How-To Guides
 
-Task-oriented recipes. Each page assumes you have completed {doc}`/user_guide/getting-started` and answers a single "how do I" question.
+Task-oriented recipes. Each page assumes you have completed [Getting Started](../getting-started.md) and answers a single "how do I" question.
 
-```{toctree}
-:maxdepth: 1
-
-use-parameters
-vector-search
-text-search
-geo-queries
-date-queries
-missing-fields
-lazy-vs-eager-schemas
-async-usage
-```
+- [Use parameters](use-parameters.md)
+- [Vector search](vector-search.md)
+- [Text search](text-search.md)
+- [GEO queries](geo-queries.md)
+- [Date queries](date-queries.md)
+- [Missing fields](missing-fields.md)
+- [Lazy vs eager schemas](lazy-vs-eager-schemas.md)
+- [Async usage](async-usage.md)

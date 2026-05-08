@@ -54,7 +54,7 @@ The complete catalog of SQL clauses, operators, and functions sql-redis recognis
 | Negation | `NOT fulltext(title, 'x')` | `-@title:x` |
 | BM25 score | `score() AS rel` | `WITHSCORES` |
 
-See {doc}`/user_guide/how_to_guides/text-search` for a task-oriented walkthrough.
+See [Text search](../user_guide/how_to_guides/text-search.md) for a task-oriented walkthrough.
 
 ## GEO
 
@@ -66,7 +66,7 @@ See {doc}`/user_guide/how_to_guides/text-search` for a task-oriented walkthrough
 | Operators | `<`, `<=`, `>`, `>=`, `BETWEEN` |
 | In `SELECT` | `geo_distance(loc, POINT(lon, lat)) AS d` |
 
-See {doc}`/user_guide/how_to_guides/geo-queries`.
+See [GEO queries](../user_guide/how_to_guides/geo-queries.md).
 
 ## Date functions
 
@@ -83,7 +83,7 @@ See {doc}`/user_guide/how_to_guides/geo-queries`.
 
 ISO 8601 date and datetime literals in `WHERE` are converted to Unix timestamps automatically.
 
-See {doc}`/user_guide/how_to_guides/date-queries`.
+See [Date queries](../user_guide/how_to_guides/date-queries.md).
 
 ## Missing fields
 
@@ -96,4 +96,4 @@ See {doc}`/user_guide/how_to_guides/date-queries`.
 
 `IS NULL` requires Redis 7.4+ and `INDEXMISSING` on the field.
 
-See {doc}`/user_guide/how_to_guides/missing-fields`.
+See [Missing fields](../user_guide/how_to_guides/missing-fields.md).

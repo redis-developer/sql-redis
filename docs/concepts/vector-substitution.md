@@ -54,4 +54,4 @@ If multi-vector queries become a thing later, the same scheme generalises: emit 
 - A `bytes` value never appears in the SQL string, so debugging tools that print the substituted SQL will still show `:vec`.
 - A `bytes` value does *not* go through `_substitute_params` quoting, so it cannot accidentally produce malformed SQL. The downside is that a misnamed `:vec` placeholder is not detected at substitution time; it produces a Redis error at execution.
 
-The user-facing recipe is in {doc}`/user_guide/how_to_guides/use-parameters` ("Vectors") and {doc}`/user_guide/how_to_guides/vector-search`.
+The user-facing recipe is in [Use parameters](../user_guide/how_to_guides/use-parameters.md) ("Vectors") and [Vector search](../user_guide/how_to_guides/vector-search.md).

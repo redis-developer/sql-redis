@@ -45,4 +45,4 @@ The following are explicitly **not** guaranteed:
 
 ## Reference
 
-The recipes for using these mechanisms (cancellation-safe queries, post-alteration invalidation, change watching) are in {doc}`/user_guide/how_to_guides/async-usage` and {doc}`/user_guide/how_to_guides/lazy-vs-eager-schemas`.
+The recipes for using these mechanisms (cancellation-safe queries, post-alteration invalidation, change watching) are in [Async usage](../user_guide/how_to_guides/async-usage.md) and [Lazy vs eager schemas](../user_guide/how_to_guides/lazy-vs-eager-schemas.md).

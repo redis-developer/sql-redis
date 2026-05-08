@@ -38,8 +38,8 @@ The sqlglot route would be more general, in particular for the theoretical case 
 
 A substitution function that handled string and numeric types but not bytes would force vector queries to either pre-encode their vectors as base64 strings (and have RediSearch reject them) or use a side-channel API. Neither is good.
 
-The library's answer is the **two-stage substitution** described in {doc}`vector-substitution`. Briefly: bytes parameters are intentionally *skipped* at the string-substitution stage. The translator emits a `$vector` placeholder, and the executor injects the raw bytes into the Redis command list after translation, where Redis accepts them natively. From the caller's perspective, vector params look identical to other params.
+The library's answer is the **two-stage substitution** described in [Vector substitution](vector-substitution.md). Briefly: bytes parameters are intentionally *skipped* at the string-substitution stage. The translator emits a `$vector` placeholder, and the executor injects the raw bytes into the Redis command list after translation, where Redis accepts them natively. From the caller's perspective, vector params look identical to other params.
 
 ## What this concept does not cover
 
-The full table of which Python types substitute into what SQL form lives in the how-to ({doc}`/user_guide/how_to_guides/use-parameters`). The reference for the regex pattern itself lives in `sql_redis/executor.py::_substitute_params`. This page is the *why*, not the *how* or *what*.
+The full table of which Python types substitute into what SQL form lives in the how-to ([Use parameters](../user_guide/how_to_guides/use-parameters.md)). The reference for the regex pattern itself lives in `sql_redis/executor.py::_substitute_params`. This page is the *why*, not the *how* or *what*.

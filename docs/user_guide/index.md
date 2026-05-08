@@ -1,43 +1,27 @@
 ---
-myst:
-  html_meta:
-    "description lang=en": |
-      sql-redis user guide. Installation, getting started, and task-oriented recipes.
+description: sql-redis user guide. Installation, getting started, and task-oriented recipes.
 ---
 
 # User Guide
 
-::::{grid} 2
-:gutter: 3
+<div class="grid cards" markdown>
 
-:::{grid-item-card} 📦 Installation
-:link: installation
-:link-type: doc
+-   :material-package-variant:{ .lg .middle } **[Installation](installation.md)**
 
-**Set up sql-redis.** pip install, Redis container, optional extras.
-:::
+    ---
 
-:::{grid-item-card} 🚀 Getting Started
-:link: getting-started
-:link-type: doc
+    Set up sql-redis. pip install, Redis container, optional extras.
 
-**Your first query.** Schema setup, executor construction, end-to-end SELECT.
-:::
+-   :material-rocket-launch:{ .lg .middle } **[Getting Started](getting-started.md)**
 
-:::{grid-item-card} 🛠️ How-To Guides
-:link: how_to_guides/index
-:link-type: doc
+    ---
 
-**Solve specific problems.** Recipes for parameters, vectors, text search, GEO, dates, async, and schema strategy.
-:::
+    Your first query. Schema setup, executor construction, end-to-end SELECT.
 
-::::
+-   :material-tools:{ .lg .middle } **[How-To Guides](how_to_guides/index.md)**
 
-```{toctree}
-:maxdepth: 2
-:hidden:
+    ---
 
-installation
-getting-started
-how_to_guides/index
-```
+    Solve specific problems. Recipes for parameters, vectors, text search, GEO, dates, async, and schema strategy.
+
+</div>

@@ -46,7 +46,7 @@ Full documentation is published at **[docs.redisvl.com/projects/sql-redis/](http
 ## For AI agents
 
 - **[`AGENTS.md`](AGENTS.md):** how to use sql-redis from an agent, including gotchas and the error model.
-- **[`docs/llms.txt`](docs/llms.txt):** flat index of every doc page with one-line summaries.
+- **[`llms.txt`](https://docs.redisvl.com/projects/sql-redis/llms.txt):** auto-generated flat index of every doc page with one-line summaries.
 - **[`docs/for-ais-only/`](docs/for-ais-only/):** repository map, build and test guide, and intentional failure modes for agents modifying the library.
 
 To build the docs locally:

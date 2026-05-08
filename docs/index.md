@@ -1,20 +1,15 @@
 ---
-myst:
-  html_meta:
-    "description lang=en": |
-      sql-redis documentation. SQL to Redis FT.SEARCH and FT.AGGREGATE translator.
+description: sql-redis documentation. SQL to Redis FT.SEARCH and FT.AGGREGATE translator.
 ---
 
 # sql-redis
 
-```{admonition} Status: Experimental
-:class: warning
+!!! warning "Status: Experimental"
 
-sql-redis is part of the [Redis AI Hub](https://redis.io/ai-hub/) under the
-**Experimental** tier. The Python API can change between minor releases. The
-project is validating its design and SQL surface in real use; we welcome bug
-reports and feedback at the [issue tracker](https://github.com/redis-applied-ai/sql-redis/issues).
-```
+    sql-redis is part of the [Redis AI Hub](https://redis.io/ai-hub/) under the
+    **Experimental** tier. The Python API can change between minor releases. The
+    project is validating its design and SQL surface in real use; we welcome bug
+    reports and feedback at the [issue tracker](https://github.com/redis-developer/sql-redis/issues).
 
 Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes. sql-redis converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands, looking up index schemas via `FT.INFO` so the translation respects the underlying field types.
 
@@ -28,66 +23,45 @@ pip install sql-redis
 docker run -d --name redis -p 6379:6379 redis:8.4
 ```
 
-→ *{doc}`user_guide/getting-started`*
+→ *[Getting Started](user_guide/getting-started.md)*
 
 ---
 
 ## Explore the Docs
 
-::::{grid} 2
-:gutter: 4
+<div class="grid cards" markdown>
 
-:::{grid-item-card} 📖 Concepts
-:link: concepts/index
-:link-type: doc
-:class-card: sd-shadow-sm
+-   :material-book-open-variant:{ .lg .middle } **[Concepts](concepts/index.md)**
 
-Understand how sql-redis works. Architecture, design decisions, and the why behind every layer.
-:::
+    ---
 
-:::{grid-item-card} 🚀 User Guide
-:link: user_guide/index
-:link-type: doc
-:class-card: sd-shadow-sm
+    Understand how sql-redis works. Architecture, design decisions, and the why behind every layer.
 
-Step by step. Installation, first query, and task-oriented recipes for every feature.
-:::
+-   :material-rocket-launch:{ .lg .middle } **[User Guide](user_guide/index.md)**
 
-:::{grid-item-card} 💡 Examples
-:link: examples/index
-:link-type: doc
-:class-card: sd-shadow-sm
+    ---
 
-Worked examples and patterns built on the sql-redis primitives.
-:::
+    Step by step. Installation, first query, and task-oriented recipes for every feature.
 
-:::{grid-item-card} 📚 API Reference
-:link: api/index
-:link-type: doc
-:class-card: sd-shadow-sm
+-   :material-lightbulb-on:{ .lg .middle } **[Examples](examples/index.md)**
 
-Every public class, method, and parameter, generated from docstrings.
-:::
+    ---
 
-::::
+    Worked examples and patterns built on the sql-redis primitives.
+
+-   :material-api:{ .lg .middle } **[API Reference](api/index.md)**
+
+    ---
+
+    Every public class, method, and parameter, generated from docstrings.
+
+</div>
 
 ## For AI agents
 
 If you are an AI agent reading these docs, start with
-[`AGENTS.md`](https://github.com/redis-applied-ai/sql-redis/blob/main/AGENTS.md)
+[`AGENTS.md`](https://github.com/redis-developer/sql-redis/blob/main/AGENTS.md)
 at the repo root for a usage-oriented quick reference, or
-{doc}`for-ais-only/index` for an internal map of the source tree. A flat
-[`llms.txt`](https://github.com/redis-applied-ai/sql-redis/blob/main/docs/llms.txt)
-index of every doc page is also available.
-
-```{toctree}
-:maxdepth: 2
-:hidden:
-
-Concepts <concepts/index>
-User Guide <user_guide/index>
-Examples <examples/index>
-API <api/index>
-For AI Agents <for-ais-only/index>
-Changelog <https://github.com/redis-developer/sql-redis/releases>
-```
+[For AI Agents](for-ais-only/index.md) for an internal map of the source tree. A
+flat [`llms.txt`](https://docs.redisvl.com/projects/sql-redis/llms.txt) index of
+every doc page is also auto-generated at build time.

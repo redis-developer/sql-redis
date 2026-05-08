@@ -21,8 +21,8 @@ build:
         UV_PROJECT_ENVIRONMENT="${READTHEDOCS_VIRTUALENV_PATH}" \
           ~/.local/bin/uv sync --frozen --group docs
 
-sphinx:
-  configuration: docs/conf.py
+mkdocs:
+  configuration: mkdocs.yml
 
 formats:
   - pdf
