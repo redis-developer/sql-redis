@@ -1,19 +1,20 @@
-# sql-redis
+<div align="center">
+    <img width="300" src="https://raw.githubusercontent.com/redis/redis-vl-python/main/docs/_static/Redis_Logo_Red_RGB.svg" alt="Redis">
+    <h1>sql-redis</h1>
+    <p><strong>SQL on top of RediSearch and RedisVL indexes</strong></p>
+</div>
 
-[![Status: Experimental](https://img.shields.io/badge/status-experimental-orange)](https://redis.io/ai-hub/)
+<div align="center">
+
+**[Documentation](https://redis-developer.github.io/sql-redis/)** • **[GitHub](https://github.com/redis-developer/sql-redis)** • **[PyPI](https://pypi.org/project/sql-redis/)**
+
+</div>
+
+---
 
 A SQL-to-Redis translator that converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands. Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes.
 
-> **Status: Experimental.** sql-redis is in the [Redis AI Hub](https://redis.io/ai-hub/) under the Experimental tier. The API can change between minor releases. Not yet production-ready; we are validating the design and the SQL surface in real use.
-
-Full documentation: **<https://redis-developer.github.io/sql-redis/>** (Diataxis-aligned: concepts, how-to guides, API reference, examples). Built with MkDocs Material from [`docs/`](docs/) and deployed to GitHub Pages on every push to `main`.
-
-Build the site locally:
-
-```bash
-uv sync --group docs
-make docs-serve   # http://localhost:8000
-```
+Full docs (concepts, how-to guides, API reference, examples) are at <https://redis-developer.github.io/sql-redis/>.
 
 ## Install
 
@@ -440,6 +441,7 @@ make install       # uv sync --all-extras
 make test          # requires Docker for testcontainers
 make test-cov      # with coverage report
 make lint          # format + mypy
+make docs-serve    # uv sync --group docs && preview at http://localhost:8000
 ```
 
 ## Testing philosophy
