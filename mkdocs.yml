@@ -11,9 +11,11 @@ docs_dir: docs
 theme:
   name: material
   language: en
+  logo: assets/redis-logo-script.svg
+  favicon: assets/favicon.png
   font:
-    text: Inter
-    code: JetBrains Mono
+    text: Space Grotesk
+    code: Space Mono
   palette:
     - media: "(prefers-color-scheme)"
       toggle:
@@ -21,15 +23,15 @@ theme:
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: red
-      accent: red
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: red
-      accent: red
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -37,8 +39,6 @@ theme:
     - navigation.instant
     - navigation.instant.progress
     - navigation.tracking
-    - navigation.tabs
-    - navigation.tabs.sticky
     - navigation.sections
     - navigation.indexes
     - navigation.top
@@ -68,10 +68,7 @@ extra:
       link: https://pypi.org/project/sql-redis/
 
 extra_css:
-  - stylesheets/redis-ai-hub-header.css
-
-extra_javascript:
-  - javascripts/redis-ai-hub-header.js
+  - stylesheets/redis-brand.css
 
 plugins:
   - search

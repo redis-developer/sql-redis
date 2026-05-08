@@ -37,8 +37,8 @@ Use this to find the right starting point fast.
 2. **100% line coverage is enforced in CI.** No `# pragma: no cover`. If a
    branch can't be tested, it shouldn't exist.
 3. **Public API is what `sql_redis/__init__.py` exports.** Anything else is
-   internal and can change without notice. The autoclass-driven reference at
-   `docs/api/` is the contract.
+   internal and can change without notice. The mkdocstrings-driven reference
+   at `docs/api/` is the contract.
 4. **Docstrings are the single source of truth for the API reference.**
    mkdocstrings reads them directly. If you change a method signature, update
    the docstring in the same change.

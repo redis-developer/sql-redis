@@ -21,8 +21,8 @@ make test-verbose   pytest -vv -s
 make test-cov       pytest with coverage report (terminal + htmlcov/)
 make check          lint + test
 make build          uv build (wheel + sdist)
-make docs-build     Build Sphinx HTML to docs/_build/html
-make docs-serve     Serve docs/_build/html on http://localhost:8000
+make docs-build     Build MkDocs HTML to ./site (strict mode)
+make docs-serve     Run mkdocs serve on http://127.0.0.1:8000
 make clean          Remove caches and build output
 ```
 
@@ -49,15 +49,15 @@ open htmlcov/index.html
 
 ```
 uv sync --group docs
-make docs-build         # writes docs/_build/html
-make docs-serve         # http://localhost:8000
+make docs-build         # writes ./site
+make docs-serve         # http://127.0.0.1:8000
 ```
 
-The Sphinx build should complete with zero warnings. Treat any warning as a
-breaking change. To enforce this in CI, run with `-W`:
+The MkDocs build runs with `--strict`, so any warning is fatal. To run the
+strict build directly:
 
 ```
-uv run --group docs sphinx-build -W -b html docs docs/_build/html
+uv run --group docs mkdocs build --strict
 ```
 
 ## CI gates (target state)

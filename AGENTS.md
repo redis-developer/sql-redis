@@ -97,7 +97,7 @@ Full reference, generated from docstrings, is at `docs/api/`.
 | Artifact | Purpose |
 |---|---|
 | [`llms.txt`](https://docs.redisvl.com/projects/sql-redis/llms.txt) | Auto-generated flat index of every doc page with one-line summaries. Built by `mkdocs-llmstxt` at deploy time. Good for in-context injection. |
-| [`docs/api/`](docs/api/) | Sphinx `autoclass` reference for every public symbol. Source of truth for method signatures. |
+| [`docs/api/`](docs/api/) | mkdocstrings reference for every public symbol, generated from Google-style docstrings. Source of truth for method signatures. |
 | [`docs/user_guide/how_to_guides/`](docs/user_guide/how_to_guides/) | Task-oriented recipes (vector search, GEO, dates, async, parameters). |
 | [`docs/concepts/`](docs/concepts/) | Why-style explanation: architecture, parameter substitution, schema-aware translation. |
 | [`docs/for-ais-only/`](docs/for-ais-only/) | Internal repo map for agents modifying the library. |
@@ -107,7 +107,7 @@ Full reference, generated from docstrings, is at `docs/api/`.
 sql-redis sits in the [Redis AI Hub](https://redis.io/ai-hub/) under the
 *Experimental* tier as "SQL for Redis". Public docs URL:
 [`docs.redisvl.com/projects/sql-redis/`](https://docs.redisvl.com/projects/sql-redis/).
-The hub's docs standards (Diataxis layout, autoclass-driven API reference,
+The hub's docs standards (Diataxis layout, docstring-driven API reference,
 AI-agent affordances) are documented at
 [`HUB_DOCS_STANDARDS.md`](https://github.com/redis/docs/blob/main/HUB_DOCS_STANDARDS.md)
 in the hub repo.
