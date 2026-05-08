@@ -14,8 +14,6 @@
 
 A SQL-to-Redis translator that converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands. Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes.
 
-Full docs (concepts, how-to guides, API reference, examples) are at <https://redis-developer.github.io/sql-redis/>.
-
 ## Install
 
 ```bash
