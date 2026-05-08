@@ -6,7 +6,7 @@
 
 <div align="center">
 
-**[Documentation](https://redis-developer.github.io/sql-redis/)** • **[GitHub](https://github.com/redis-developer/sql-redis)** • **[PyPI](https://pypi.org/project/sql-redis/)**
+**[Documentation](https://redis-developer.github.io/sql-redis/)** • **[PyPI](https://pypi.org/project/sql-redis/)**
 
 </div>
 
