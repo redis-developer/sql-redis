@@ -2,9 +2,16 @@
 description: sql-redis documentation. SQL to Redis FT.SEARCH and FT.AGGREGATE translator.
 ---
 
+<div class="rds-hero" markdown>
+
+![Redis](assets/redis-logo-script-red.svg){ .rds-hero__logo }
+
 # sql-redis
 
-Query Redis collections with familiar SQL on top of RediSearch and RedisVL indexes. sql-redis converts SQL `SELECT` statements into Redis `FT.SEARCH` and `FT.AGGREGATE` commands, looking up index schemas via `FT.INFO` so the translation respects the underlying field types.
+SQL for RediSearch and RedisVL indexes
+{ .rds-hero__tagline }
+
+</div>
 
 ## Quick Start
 

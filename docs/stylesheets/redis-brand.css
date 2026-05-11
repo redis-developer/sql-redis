@@ -37,3 +37,55 @@
 .md-nav--primary > .md-nav__list > .md-nav__item > .md-nav__link {
   font-weight: 700;
 }
+
+/* Landing-page hero: Redis script logo stacked over the wordmark and tagline.
+ * Mirrors the marketing card used on docs.redisvl.com hand-offs. */
+.rds-hero {
+  text-align: center;
+  margin: 1.5rem auto 2.5rem;
+  padding: 0 1rem;
+}
+
+.rds-hero__logo {
+  display: block;
+  margin: 0 auto 0.75rem;
+  width: clamp(180px, 32vw, 280px);
+  aspect-ratio: 85 / 27;
+  height: auto;
+}
+
+.rds-hero h1 {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3.2vw, 2.125rem);
+  line-height: 1.15;
+  color: var(--rds-midnight);
+  letter-spacing: -0.01em;
+}
+
+[data-md-color-scheme="slate"] .rds-hero h1 {
+  color: #F2F4F5;
+}
+
+.rds-hero__tagline {
+  margin: 0.5rem 0 0;
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  color: var(--rds-slate);
+  font-weight: 400;
+}
+
+[data-md-color-scheme="slate"] .rds-hero__tagline {
+  color: var(--rds-mute);
+}
+
+/* Layout: pin the left sidebar to the viewport's left edge and the right
+ * TOC to the viewport's right edge by removing Material's centered grid
+ * cap. Sidebars keep their default 12.1rem widths; the content column
+ * absorbs all remaining space. Header/tabs use the same grid so they
+ * also span full width, keeping the layout consistent.
+ */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: none;
+  }
+}
