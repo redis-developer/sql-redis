@@ -156,6 +156,10 @@ class Translator:
             )
 
         # Determine if we need FT.AGGREGATE
+        # Multi-key ORDER BY also requires FT.AGGREGATE: FT.SEARCH SORTBY
+        # accepts a single key, while FT.AGGREGATE SORTBY accepts multiple.
+        # Routing automatically prevents the silent drop of trailing keys
+        # that used to happen on the FT.SEARCH path.
         use_aggregate = (
             len(analyzed.aggregations) > 0
             or len(analyzed.groupby_fields) > 0
@@ -165,6 +169,7 @@ class Translator:
             or len(analyzed.date_functions) > 0
             or has_date_func_conditions
             or len(parsed.filters) > 0  # exists() in HAVING → FILTER
+            or len(parsed.orderby_fields) > 1  # multi-key ORDER BY
         )
 
         # Build query string from conditions
@@ -310,6 +315,15 @@ class Translator:
                 inorder=condition.inorder,
             )
         elif field_type == "TAG":
+            # BETWEEN is meaningless for TAG values; RediSearch tags have no
+            # ordering, so 'a' <= status <= 'z' has no defined semantics.
+            # Previously the parser fell through and the builder emitted
+            # @status:{\('a'\, 'z'\)} (invalid). Surface the limitation.
+            if operator == "BETWEEN":
+                raise ValueError(
+                    f"BETWEEN is not supported on TAG fields ('{condition.field}'); "
+                    "TAG values are unordered. Use IN (...) for a set match."
+                )
             # Keep list value for IN clauses, convert scalar to string
             value = (
                 condition.value
@@ -320,8 +334,35 @@ class Translator:
                 condition.field,
                 operator,
                 value,
+                negated=is_negated,
             )
         elif field_type == "NUMERIC":
+            # IN (...) on a NUMERIC field was previously handed a list value
+            # to build_numeric_condition, which then tried float([1,2,3]) and
+            # crashed. RediSearch has no native IN for NUMERIC; expand to a
+            # union of equality ranges (negated → AND of NOT-equals).
+            if operator == "IN":
+                if not isinstance(condition.value, list) or not condition.value:
+                    raise ValueError(
+                        f"IN on NUMERIC field '{condition.field}' requires a "
+                        "non-empty list of values."
+                    )
+                parts: list[str] = []
+                for item in condition.value:
+                    item_num = self._convert_to_numeric(item)
+                    parts.append(
+                        self._query_builder.build_numeric_condition(
+                            condition.field, "=", item_num, negated=is_negated
+                        )
+                    )
+                if len(parts) == 1:
+                    return parts[0]
+                # NOT IN (...) → AND of negated equalities (De Morgan)
+                # IN (...) → OR of equalities
+                joiner = " " if is_negated else "|"
+                joined = joiner.join(parts)
+                return f"({joined})"
+
             # Cast value to expected type for numeric conditions
             numeric_value: int | float | tuple[int | float, int | float]
             if isinstance(condition.value, tuple):
@@ -345,6 +386,7 @@ class Translator:
                 condition.field,
                 operator,
                 numeric_value,
+                negated=is_negated,
             )
         else:
             # GEO, VECTOR, and unknown field types - default to text search
@@ -425,6 +467,9 @@ class Translator:
         # SORTBY — skip if the ORDER BY field is a score() alias, because
         # WITHSCORES already returns results in relevance order and the alias
         # is not a sortable indexed field.
+        # Multi-key ORDER BY is routed to FT.AGGREGATE upstream (see
+        # use_aggregate in _build_command), so by the time we reach this
+        # branch parsed.orderby_fields has at most one entry.
         score_alias_name = parsed.scoring.alias if parsed.scoring else None
         if parsed.orderby_fields:
             field_name, direction = parsed.orderby_fields[0]
@@ -522,6 +567,18 @@ class Translator:
             # Load fields referenced in exists() computed fields (SELECT)
             for computed in analyzed.computed_fields:
                 self._extract_exists_fields(computed.expression, load_fields)
+            # Load ORDER BY fields so multi-key SORTBY works on non-SORTABLE
+            # columns. (SORTABLE fields are already in scope; loading them
+            # again is harmless.) Skip computed/derived aliases.
+            computed_aliases = {cf.alias for cf in analyzed.computed_fields}
+            computed_aliases.update(df.alias for df in analyzed.date_functions)
+            computed_aliases.update(gs.alias for gs in parsed.geo_distance_selects)
+            for field_name, _ in parsed.orderby_fields:
+                if (
+                    field_name in analyzed.field_types
+                    and field_name not in computed_aliases
+                ):
+                    load_fields.add(field_name)
 
         if load_all:
             args.extend(["LOAD", "*"])

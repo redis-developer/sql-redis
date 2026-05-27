@@ -579,6 +579,213 @@ class TestTranslatorNegation:
         assert result.query_string == "@title:good"
 
 
+class TestTranslatorTrialUserBug:
+    """Regression tests for the v0.5.0 trial-user bug report (error_spec.md).
+
+    Critical:
+    - NOT is silently dropped for >, >=, <, <=, BETWEEN, IN on tag/numeric.
+    - TAG pipe | is not escaped, so 'a|b' is interpreted as 'a' OR 'b'.
+
+    High:
+    - IN on NUMERIC crashes.
+    - LIKE '' produces invalid syntax.
+    - BETWEEN on TAG produces invalid syntax.
+    - Double-quoted value (identifier) becomes None.
+
+    Medium:
+    - SELECT DISTINCT is silently ignored.
+    - Multi-column ORDER BY drops trailing keys.
+    """
+
+    def test_not_in_on_tag(self, translator: Translator, basic_index: str):
+        """NOT IN on TAG → -@status:{a|b} (excludes), not @status:{a|b} (matches)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status NOT IN ('a', 'b')"
+        )
+        assert result.query_string == "-@status:{a|b}"
+
+    def test_not_between_on_numeric(self, translator: Translator, basic_index: str):
+        """NOT BETWEEN on NUMERIC → -@price:[10 20] (outside range)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE price NOT BETWEEN 10 AND 20"
+        )
+        assert result.query_string == "-@price:[10 20]"
+
+    def test_not_greater_than_on_numeric(
+        self, translator: Translator, basic_index: str
+    ):
+        """NOT field > 5 on NUMERIC → -@price:[(5 +inf] (i.e. price <= 5)."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE NOT price > 5"
+        )
+        # Both shapes are semantically equivalent (NOT (price>5) == price<=5).
+        # Accept either the literal -[(5 +inf] form or the rewritten [-inf 5] form.
+        assert result.query_string in ("-@price:[(5 +inf]", "@price:[-inf 5]")
+
+    def test_mixed_not_text_and_not_numeric(
+        self, translator: Translator, basic_index: str
+    ):
+        """The crystallizing example: only the = negation worked before; > was dropped.
+
+        NOT title = 'x' AND NOT price > 50 must negate both sides.
+        """
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} " "WHERE NOT title = 'x' AND NOT price > 50"
+        )
+        assert "-@title:x" in result.query_string
+        # The numeric NOT must also be applied (was previously dropped).
+        assert (
+            "-@price:[(50 +inf]" in result.query_string
+            or "@price:[-inf 50]" in result.query_string
+        )
+
+    def test_tag_value_with_pipe_is_escaped(
+        self, translator: Translator, basic_index: str
+    ):
+        """status = 'a|b' must match the literal value 'a|b', not 'a' OR 'b'."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status = 'a|b'"
+        )
+        assert result.query_string == r"@status:{a\|b}"
+
+    def test_tag_in_with_pipe_inside_value(
+        self, translator: Translator, basic_index: str
+    ):
+        """IN ('x|y', 'z') must yield two values (x|y, z), not three."""
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} WHERE status IN ('x|y', 'z')"
+        )
+        assert result.query_string == r"@status:{x\|y|z}"
+
+    def test_in_on_numeric_does_not_crash(
+        self, translator: Translator, basic_index: str
+    ):
+        """price IN (1, 2, 3) must not raise TypeError.
+
+        Either a clear ValueError (rejecting IN on numeric) or a valid query
+        such as the union of equality ranges is acceptable; the crash on a
+        list-to-float coercion is not.
+        """
+        try:
+            result = translator.translate(
+                f"SELECT * FROM {basic_index} WHERE price IN (1, 2, 3)"
+            )
+        except ValueError:
+            # Surfacing the limitation is acceptable
+            return
+        # If it succeeds, must not be the broken `[1 [1, 2, 3]]` shape.
+        assert "[1, 2, 3]" not in result.query_string
+
+    def test_empty_like_does_not_produce_bare_colon(
+        self, translator: Translator, basic_index: str
+    ):
+        """LIKE '' must not emit a bare `@title:` (invalid RediSearch syntax).
+
+        A clear ValueError is preferred over silent invalid output.
+        """
+        try:
+            result = translator.translate(
+                f"SELECT * FROM {basic_index} WHERE title LIKE ''"
+            )
+        except ValueError:
+            return
+        # If accepted, the query string must not contain the bare-colon shape.
+        assert not result.query_string.rstrip().endswith("@title:")
+        assert "@title: " not in result.query_string
+
+    def test_between_on_tag_is_rejected(self, translator: Translator, basic_index: str):
+        """BETWEEN on a TAG field is meaningless and must raise.
+
+        Previously produced @status:{\\('a'\\, 'z'\\)}, which is invalid.
+        """
+        with pytest.raises(ValueError):
+            translator.translate(
+                f"SELECT * FROM {basic_index} " "WHERE status BETWEEN 'a' AND 'z'"
+            )
+
+    def test_double_quoted_value_does_not_become_none(
+        self, translator: Translator, basic_index: str
+    ):
+        """status = "active" (double-quoted SQL identifier) must not become None.
+
+        sqlglot parses "active" as an identifier (exp.Column). The translator
+        previously called _extract_literal_value which returned None, yielding
+        @status:{None}. Either accept it as a string literal or raise; never
+        emit the literal token 'None' into the query.
+        """
+        try:
+            result = translator.translate(
+                f'SELECT * FROM {basic_index} WHERE status = "active"'
+            )
+        except ValueError:
+            return
+        assert "None" not in result.query_string
+        # If accepted, expect the value treated as a string literal:
+        assert "@status:{active}" in result.query_string
+
+    def test_select_distinct_is_not_silently_ignored(
+        self, translator: Translator, basic_index: str
+    ):
+        """SELECT DISTINCT must not silently behave like a plain SELECT.
+
+        Either: produce a query that deduplicates (e.g. GROUPBY on the
+        selected columns), or raise to surface that DISTINCT is unsupported.
+        Silently returning duplicate rows is the bug.
+        """
+        try:
+            result = translator.translate(f"SELECT DISTINCT status FROM {basic_index}")
+        except ValueError:
+            return
+        # FT.SEARCH cannot dedupe; an FT.AGGREGATE with GROUPBY @status is the
+        # only sane way to honor DISTINCT here.
+        assert result.command == "FT.AGGREGATE"
+        assert "GROUPBY" in result.args
+        gb_idx = result.args.index("GROUPBY")
+        # Must group by @status
+        assert "@status" in result.args[gb_idx : gb_idx + 4]
+
+    def test_multi_column_order_by_preserved(
+        self, translator: Translator, basic_index: str
+    ):
+        """ORDER BY a ASC, b DESC must not drop the trailing key.
+
+        FT.SEARCH SORTBY only accepts one key; FT.AGGREGATE SORTBY accepts
+        multiple. The translator auto-routes multi-key ORDER BY to
+        FT.AGGREGATE so both keys survive.
+        """
+        result = translator.translate(
+            f"SELECT * FROM {basic_index} ORDER BY price ASC, title DESC"
+        )
+        # Multi-key ORDER BY triggers FT.AGGREGATE
+        assert result.command == "FT.AGGREGATE"
+        assert "SORTBY" in result.args
+        sb_idx = result.args.index("SORTBY")
+        # FT.AGGREGATE SORTBY format: SORTBY nargs @field dir @field dir
+        assert result.args[sb_idx + 1] == "4"  # 2 keys * 2 (field+dir)
+        assert result.args[sb_idx + 2] == "@price"
+        assert result.args[sb_idx + 3] == "ASC"
+        assert result.args[sb_idx + 4] == "@title"
+        assert result.args[sb_idx + 5] == "DESC"
+
+    def test_multi_column_order_by_loads_non_select_field(
+        self, translator: Translator, basic_index: str
+    ):
+        """When ORDER BY references a column outside SELECT, LOAD must
+        include it so the sort works on non-SORTABLE columns."""
+        result = translator.translate(
+            f"SELECT title FROM {basic_index} " "ORDER BY price ASC, content DESC"
+        )
+        assert result.command == "FT.AGGREGATE"
+        assert "LOAD" in result.args
+        load_idx = result.args.index("LOAD")
+        load_count = int(result.args[load_idx + 1])
+        loaded = result.args[load_idx + 2 : load_idx + 2 + load_count]
+        # The ORDER BY columns must be loaded along with the SELECT column
+        assert "@price" in loaded
+        assert "@content" in loaded
+        assert "@title" in loaded
+
+
 class TestTranslatorOutput:
     """Tests for output format methods."""
 

@@ -28,7 +28,10 @@ Redis search results come out as a `QueryResult(rows, count)`.
   translator.
 - Writes. There is no `INSERT`, `UPDATE`, or `DELETE`. Write through `redis-py`.
 - Index creation. Use `FT.CREATE` directly via `redis-py` first.
-- Cross-index joins, subqueries, `HAVING`, `DISTINCT`. Not implemented.
+- Cross-index joins, subqueries, `HAVING`. Not implemented.
+- `SELECT DISTINCT` is supported for bare column projections (routed to
+  `FT.AGGREGATE` with `GROUPBY`). `SELECT DISTINCT *` and `DISTINCT` mixed
+  with aggregates raise `ValueError`.
 
 ## The minimum useful snippet
 
@@ -80,8 +83,10 @@ Full reference, generated from docstrings, is at `docs/api/`.
 6. **Lazy schema loading is the default.** The first query that touches an
    index issues one `FT.INFO`. Pass `schema_cache_strategy="load_all"` to
    `create_executor` if you want to fail fast on missing indexes at startup.
-7. **No JOIN, subquery, HAVING, or DISTINCT.** The translator raises
-   `ValueError`; do not retry with rephrasing.
+7. **No JOIN, subquery, or HAVING.** The translator raises `ValueError`;
+   do not retry with rephrasing. `SELECT DISTINCT col1, col2, ...` is
+   supported for column projections; `DISTINCT *` and `DISTINCT` mixed with
+   aggregates still raise.
 8. **GEO uses `POINT(lon, lat)` order.** Longitude first, matching Redis.
 
 ## Error model an agent can expect

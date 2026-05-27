@@ -125,12 +125,31 @@ class Analyzer:
         for date_func in parsed.date_functions:
             referenced_fields.add(date_func.field)
 
-        # Collect aliases from date functions and computed fields (for GROUP BY)
+        # Collect aliases from date functions, computed fields, the score()
+        # alias, and aggregation aliases. These are computed in the query
+        # pipeline rather than loaded from documents, so GROUP BY / ORDER BY
+        # references to them must not be looked up in the schema.
         alias_names = {df.alias for df in parsed.date_functions}
         alias_names.update(cf.alias for cf in parsed.computed_fields)
+        if parsed.scoring is not None:
+            alias_names.add(parsed.scoring.alias)
+        for agg in parsed.aggregations:
+            if agg.alias:
+                alias_names.add(agg.alias)
+        if parsed.vector_search is not None and parsed.vector_search.alias:
+            # ORDER BY <vector-distance-alias> is the canonical way to sort by
+            # KNN similarity; the alias is a computed column, not an indexed
+            # field, so it must not be looked up in the schema.
+            alias_names.add(parsed.vector_search.alias)
 
         # Fields from GROUP BY (exclude aliases since they're computed)
         for field_name in parsed.groupby_fields:
+            if field_name not in alias_names:
+                referenced_fields.add(field_name)
+
+        # Fields from ORDER BY (so they are validated against the schema
+        # and available for LOAD in the FT.AGGREGATE path)
+        for field_name, _ in parsed.orderby_fields:
             if field_name not in alias_names:
                 referenced_fields.add(field_name)
 

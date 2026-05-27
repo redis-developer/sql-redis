@@ -72,13 +72,14 @@ Pass `decode_responses=True` to the `Redis` client if you want string keys inste
 - [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc.
 - [x] `IS NULL` / `IS NOT NULL` via `ismissing()` (requires Redis 7.4+)
 - [x] `exists()` function for field presence checks
+- [x] `SELECT DISTINCT col1, col2, ...` on bare column projections (routed to `FT.AGGREGATE` with `GROUPBY`)
 
 ## What's not implemented (yet)
 
 - [ ] JOINs (Redis doesn't support cross-index joins)
 - [ ] Subqueries
 - [ ] HAVING clause
-- [ ] DISTINCT
+- [ ] `SELECT DISTINCT *` and `DISTINCT` mixed with aggregate functions (both raise `ValueError`)
 - [ ] Index creation from SQL (`CREATE INDEX`)
 
 The translator raises `ValueError` for unsupported clauses; do not retry with rephrasing.

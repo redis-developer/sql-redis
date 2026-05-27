@@ -264,6 +264,7 @@ class ParsedQuery:
     offset: int | None = None
     filters: list[str] = dataclasses.field(default_factory=list)
     scoring: ScoringSpec | None = None  # Relevance scoring config
+    distinct: bool = False  # SELECT DISTINCT was specified
 
 
 class SQLParser:
@@ -291,8 +292,30 @@ class SQLParser:
         # Extract SELECT fields and aggregations
         select = ast.find(exp.Select)
         if select:
+            if select.args.get("distinct") is not None:
+                result.distinct = True
             for expression in select.expressions:
                 self._process_select_expression(expression, result)
+            if result.distinct:
+                # Validate DISTINCT shape here; the groupby_fields promotion
+                # happens after the GROUP BY clause is parsed (below) so an
+                # explicit GROUP BY does not duplicate the projected columns.
+                if "*" in result.fields:
+                    raise ValueError(
+                        "SELECT DISTINCT * is not supported; "
+                        "list the columns to deduplicate by explicitly."
+                    )
+                if result.aggregations:
+                    # AGG(DISTINCT ...) is handled per-aggregate; mixing
+                    # top-level DISTINCT with aggregations has no clean Redis
+                    # mapping. Reject so users do not silently get one or the
+                    # other applied.
+                    raise ValueError(
+                        "SELECT DISTINCT combined with aggregate functions "
+                        "is not supported; use GROUP BY explicitly."
+                    )
+                if not result.fields:
+                    raise ValueError("SELECT DISTINCT requires at least one column.")
 
         # Extract WHERE clause conditions
         where = ast.find(exp.Where)
@@ -310,6 +333,12 @@ class SQLParser:
             for expr in group.expressions:
                 if isinstance(expr, exp.Column):
                     result.groupby_fields.append(expr.name)
+
+        # SELECT DISTINCT: promote the projected columns to GROUP BY so the
+        # query routes to FT.AGGREGATE and emits GROUPBY @col1 @col2 ...
+        # An explicit GROUP BY takes precedence so we do not duplicate keys.
+        if result.distinct and not result.groupby_fields:
+            result.groupby_fields = list(result.fields)
 
         # Extract HAVING clause — exists() in HAVING → FILTER
         having = ast.find(exp.Having)
@@ -1281,6 +1310,16 @@ class SQLParser:
             inner_value = self._extract_literal_value(expression.this)
             if inner_value is not None:
                 return -inner_value
+        elif isinstance(expression, exp.Column):
+            # SQL with ANSI quoting parses "active" as an identifier
+            # (exp.Column(Identifier(quoted=True))), not a string literal.
+            # Users who write `status = "active"` clearly intend a value
+            # comparison; silently turning it into None produced
+            # `@status:{None}` and crashed on NUMERIC fields. Treat a quoted
+            # identifier in value position as its string contents.
+            ident = expression.this
+            if isinstance(ident, exp.Identifier) and ident.args.get("quoted"):
+                return ident.this
         return None
 
     def _validate_geo_unit(self, unit_val: object) -> str:
