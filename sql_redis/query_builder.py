@@ -49,8 +49,11 @@ REDIS_DEFAULT_STOPWORDS = frozenset(
 class QueryBuilder:
     """Builds RediSearch query syntax from conditions."""
 
-    # Characters that need escaping in TAG values
-    TAG_SPECIAL_CHARS = r".,<>{}[]\"':;!@#$%^&*()-+=~"
+    # Characters that need escaping in TAG values.
+    # `|` separates values inside an IN list at the syntax level, so a literal
+    # pipe inside a value must be escaped; otherwise `status = 'a|b'` parses
+    # as `status IN ('a', 'b')`.
+    TAG_SPECIAL_CHARS = r".,<>{}[]\"':;!@#$%^&*()-+=~|"
 
     # Characters that have special meaning in RediSearch free-text queries
     # (outside double-quoted phrases). Must be escaped with backslash.
@@ -139,6 +142,13 @@ class QueryBuilder:
 
         # Build search_value based on operator — shared by single- and multi-field paths
         if operator == "LIKE":
+            # LIKE '' produces no token and no wildcard, so RediSearch emits a
+            # bare `@field:` which is a syntax error at runtime. Reject early.
+            if value == "":
+                raise ValueError(
+                    "LIKE pattern must not be empty. Use IS NULL / IS NOT NULL "
+                    "to test for field absence, or '%' to match any value."
+                )
             # Escape special chars in the non-wildcard portion, then convert % → *
             # Split on %, escape each segment, rejoin with *
             parts = value.split("%")
@@ -344,6 +354,7 @@ class QueryBuilder:
         field: str,
         operator: str,
         value: str | list[str],
+        negated: bool = False,
     ) -> str:
         """Build query syntax for TAG field conditions.
 
@@ -351,11 +362,13 @@ class QueryBuilder:
             field: Field name.
             operator: One of =, !=, IN.
             value: Tag value or list of values for IN.
+            negated: If True, prefix with `-` for negation. Covers NOT IN
+                and NOT field = .... The `!=` operator is also honored.
 
         Returns:
             RediSearch query syntax like @field:{value} or @field:{v1|v2}.
         """
-        prefix = "-" if operator == "!=" else ""
+        prefix = "-" if negated or operator == "!=" else ""
 
         if isinstance(value, list):
             # IN clause - join with |
@@ -371,6 +384,7 @@ class QueryBuilder:
         field: str,
         operator: str,
         value: int | float | tuple[int | float, int | float],
+        negated: bool = False,
     ) -> str:
         """Build query syntax for NUMERIC field conditions.
 
@@ -378,11 +392,14 @@ class QueryBuilder:
             field: Field name.
             operator: One of =, !=, <, <=, >, >=, BETWEEN.
             value: Numeric value or (min, max) tuple for BETWEEN.
+            negated: If True, prefix the resulting range with - so that
+                NOT field > x, NOT BETWEEN, etc. are honored. Without this,
+                NOT on comparison operators was silently dropped.
 
         Returns:
             RediSearch query syntax like @field:[min max].
         """
-        prefix = "-" if operator == "!=" else ""
+        prefix = "-" if negated or operator == "!=" else ""
 
         if operator == "BETWEEN":
             if isinstance(value, tuple):
@@ -390,17 +407,17 @@ class QueryBuilder:
                 return f"{prefix}@{field}:[{min_val} {max_val}]"
             raise ValueError("BETWEEN operator requires a tuple (min, max)")
         elif operator == "=":
-            return f"@{field}:[{value} {value}]"
+            return f"{prefix}@{field}:[{value} {value}]"
         elif operator == "!=":
-            return f"-@{field}:[{value} {value}]"
+            return f"{prefix}@{field}:[{value} {value}]"
         elif operator == ">":
-            return f"@{field}:[({value} +inf]"
+            return f"{prefix}@{field}:[({value} +inf]"
         elif operator == ">=":
-            return f"@{field}:[{value} +inf]"
+            return f"{prefix}@{field}:[{value} +inf]"
         elif operator == "<":
-            return f"@{field}:[-inf ({value}]"
+            return f"{prefix}@{field}:[-inf ({value}]"
         elif operator == "<=":
-            return f"@{field}:[-inf {value}]"
+            return f"{prefix}@{field}:[-inf {value}]"
         else:
             raise ValueError(f"Unknown numeric operator: {operator}")
 

@@ -801,6 +801,99 @@ class TestQueryBuilderEscaping:
         assert result == "@title:(laptop|~gaming)"
 
 
+class TestQueryBuilderNegationBug:
+    """Regression tests for the v0.5.0 trial-user NOT-handling bug.
+
+    `build_text_condition` already accepts negated; `build_tag_condition` and
+    `build_numeric_condition` historically only honored != via operator, so
+    `NOT field > x`, `NOT field IN (...)`, `NOT field BETWEEN ...` etc. were
+    silently dropped. These tests assert the builder applies the `-` prefix
+    when `negated=True` for every comparison operator.
+    """
+
+    def test_tag_in_negated(self):
+        """NOT IN on TAG → -@field:{a|b}."""
+        builder = QueryBuilder()
+        result = builder.build_tag_condition("status", "IN", ["a", "b"], negated=True)
+        assert result == "-@status:{a|b}"
+
+    def test_tag_equality_negated(self):
+        """NOT field = 'x' on TAG → -@field:{x}."""
+        builder = QueryBuilder()
+        result = builder.build_tag_condition("status", "=", "a", negated=True)
+        assert result == "-@status:{a}"
+
+    def test_tag_negated_plus_neq_single_dash(self):
+        """negated=True combined with operator='!=' yields one `-`, not two.
+
+        The translator collapses double negation upstream, so the builder
+        normally never sees this state. The contract guards against accidental
+        double-prefixing if a caller passes both signals.
+        """
+        builder = QueryBuilder()
+        result = builder.build_tag_condition("status", "!=", "a", negated=True)
+        assert result == "-@status:{a}"
+
+    def test_numeric_gt_negated(self):
+        """NOT field > 5 on NUMERIC → -@field:[(5 +inf]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition("age", ">", 5, negated=True)
+        assert result == "-@age:[(5 +inf]"
+
+    def test_numeric_gte_negated(self):
+        """NOT field >= 5 on NUMERIC → -@field:[5 +inf]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition("age", ">=", 5, negated=True)
+        assert result == "-@age:[5 +inf]"
+
+    def test_numeric_lt_negated(self):
+        """NOT field < 5 on NUMERIC → -@field:[-inf (5]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition("age", "<", 5, negated=True)
+        assert result == "-@age:[-inf (5]"
+
+    def test_numeric_lte_negated(self):
+        """NOT field <= 5 on NUMERIC → -@field:[-inf 5]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition("age", "<=", 5, negated=True)
+        assert result == "-@age:[-inf 5]"
+
+    def test_numeric_between_negated(self):
+        """NOT BETWEEN on NUMERIC → -@field:[10 20]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition(
+            "age", "BETWEEN", (10, 20), negated=True
+        )
+        assert result == "-@age:[10 20]"
+
+    def test_numeric_equality_negated(self):
+        """NOT field = 5 on NUMERIC → -@field:[5 5]."""
+        builder = QueryBuilder()
+        result = builder.build_numeric_condition("age", "=", 5, negated=True)
+        assert result == "-@age:[5 5]"
+
+
+class TestQueryBuilderTagPipeEscape:
+    """Regression test for unescaped | in TAG values.
+
+    Without escaping, `status = 'a|b'` produces `@status:{a|b}` which
+    RediSearch reads as `a OR b`. The literal value `'a|b'` is lost.
+    """
+
+    def test_tag_pipe_is_escaped(self):
+        """TAG value with literal pipe must be escaped."""
+        builder = QueryBuilder()
+        result = builder.build_tag_condition("status", "=", "a|b")
+        assert result == r"@status:{a\|b}"
+
+    def test_tag_in_pipe_is_escaped(self):
+        """TAG IN with literal pipe inside a value escapes only the inner pipe."""
+        builder = QueryBuilder()
+        result = builder.build_tag_condition("status", "IN", ["x|y", "z"])
+        # Inner | must be escaped; the IN-separator | between values stays raw.
+        assert result == r"@status:{x\|y|z}"
+
+
 class TestQueryBuilderSlopValidation:
     """Tests for slop validation at the QueryBuilder level."""
 

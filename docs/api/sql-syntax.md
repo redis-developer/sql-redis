@@ -24,6 +24,7 @@ The complete catalog of SQL clauses, operators, and functions sql-redis recognis
 | Date functions (`YEAR`, `MONTH`, `DAY`, `DATE_FORMAT`, ...) | yes |
 | `IS NULL` / `IS NOT NULL` (Redis 7.4+) | yes |
 | `exists()` for field presence | yes |
+| `SELECT DISTINCT col1, col2, ...` | yes (column projections only; routed to `FT.AGGREGATE` with `GROUPBY`) |
 
 ## Not supported
 
@@ -32,7 +33,8 @@ The complete catalog of SQL clauses, operators, and functions sql-redis recognis
 | `JOIN` | Redis has no cross-index join. |
 | Subqueries | Out of scope for the POC. |
 | `HAVING` | Out of scope (use `WHERE` plus `GROUP BY` where possible). |
-| `DISTINCT` | Out of scope. |
+| `SELECT DISTINCT *` | Cannot group by an unspecified set of columns; list them explicitly. |
+| `DISTINCT` with aggregate functions | Use `GROUP BY` explicitly, or `COUNT(DISTINCT col)` for cardinality. |
 | `CREATE INDEX` | sql-redis does not create schemas. Use `FT.CREATE`. |
 
 ## TEXT search
