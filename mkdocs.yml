@@ -1,6 +1,6 @@
 site_name: sql-redis
 site_description: SQL to Redis FT.SEARCH and FT.AGGREGATE translator.
-site_url: https://redis-developer.github.io/sql-redis/
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://docs.redisvl.com/projects/sql-redis/en/stable/"]
 repo_url: https://github.com/redis-developer/sql-redis
 repo_name: redis-developer/sql-redis
 edit_uri: edit/main/docs/
