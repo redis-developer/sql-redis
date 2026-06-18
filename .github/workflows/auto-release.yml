@@ -23,15 +23,18 @@ env:
   PYTHON_VERSION: "3.11"
   UV_VERSION: "0.7.13"
   AUTO_VERSION: "11.3.6"
-  RELEASE_BOT_NAME: "github-actions[bot]"
-  RELEASE_BOT_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+  # Org-owned "applied-ai-releases" GitHub App. The same app is used across the
+  # applied-ai repos (e.g. redis-vl-python) so releases push as one identity.
+  RELEASE_APP_ID: "2959093"
+  RELEASE_BOT_NAME: "applied-ai-releases[bot]"
+  RELEASE_BOT_EMAIL: "applied-ai-releases[bot]@users.noreply.github.com"
 
 jobs:
   gate:
     name: Gate on merged PR label
     runs-on: ubuntu-latest
     # Prevent infinite loops from the bot's "chore(release)" commit.
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'applied-ai-releases[bot]'
     outputs:
       should_release: ${{ steps.find_pr.outputs.should_release }}
       pr_number: ${{ steps.find_pr.outputs.pr_number }}
@@ -87,16 +90,24 @@ jobs:
       # 'true' for manual bootstrap runs; 'false' or empty otherwise.
       FIRST_RELEASE: ${{ github.event.inputs.first_release || 'false' }}
     steps:
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
           fetch-tags: true
-          # RELEASE_PAT (a PAT with repo + workflow scopes) lets the bot push to
-          # protected branches and trigger other workflows. Falls back to
-          # GITHUB_TOKEN for repos without branch protection.
-          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # Token from the org-owned applied-ai-releases GitHub App. The app is a
+          # bypass actor on main's protection, so it can push the release commit
+          # and tag directly. App tokens are short-lived (auto-expire ~1h).
+          token: ${{ steps.app_token.outputs.token }}
 
       - name: Install Python
         uses: actions/setup-python@v6
@@ -135,7 +146,7 @@ jobs:
         id: resolve_version
         if: env.FIRST_RELEASE != 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
           RAW_VERSION="$(auto shipit --name "${RELEASE_BOT_NAME}" --email "${RELEASE_BOT_EMAIL}" --dry-run --quiet | tail -n1 | tr -d '\r')"
@@ -158,7 +169,7 @@ jobs:
       - name: Commit version bump
         if: env.FIRST_RELEASE != 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
           if git diff --quiet -- pyproject.toml; then
@@ -192,7 +203,7 @@ jobs:
 
       - name: Create labels (idempotent)
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: auto create-labels
 
       - name: Create and push tag
@@ -214,7 +225,7 @@ jobs:
 
       - name: Create GitHub release with auto notes
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
           args=(--to "${{ steps.release_commit.outputs.sha }}" --use-version "v${{ steps.final_version.outputs.version }}")
