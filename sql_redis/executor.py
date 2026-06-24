@@ -119,6 +119,54 @@ class _ScoreParseMixin:
     """Shared helpers for score-related response parsing."""
 
     @staticmethod
+    def _is_unknown_command(error_msg: str) -> bool:
+        """Return True when a ResponseError means the command is unsupported."""
+        lowered = error_msg.lower()
+        return "unknown command" in lowered or "unknown subcommand" in lowered
+
+    @staticmethod
+    def _parse_hybrid_reply(raw_result) -> tuple[Any, list[dict]]:
+        """Parse an FT.HYBRID reply into (count, rows).
+
+        FT.HYBRID does not use the FT.AGGREGATE array shape. The reply is a map
+        ``{total_results: N, results: [...], warnings: [...], ...}`` that arrives
+        either as a dict (redis-py 8.x / RESP3) or as a flat list
+        (``[total_results, N, results, [...], ...]``) on RESP2. Each result row
+        is likewise a dict or a flat ``[field, val, ...]`` list. Keys/values may
+        be bytes or str depending on the client's decode_responses setting.
+        """
+        if isinstance(raw_result, dict):
+            reply = raw_result
+        else:
+            reply = dict(zip(raw_result[::2], raw_result[1::2]))
+
+        def _field(name: str):
+            if name in reply:
+                return reply[name]
+            return reply.get(name.encode())
+
+        count = _field("total_results") or 0
+        results = _field("results") or []
+        rows = [
+            dict(row) if isinstance(row, dict) else dict(zip(row[::2], row[1::2]))
+            for row in results
+        ]
+        return count, rows
+
+    @staticmethod
+    def _inject_vector_param(cmd: list[str | bytes], vector_param: bytes) -> None:
+        """Replace the vector PARAMS value with the actual bytes, in place.
+
+        Only the ``$vector`` token in the PARAMS value position (the one
+        preceded by the param name ``vector``) is replaced. Query-side
+        references to ``$vector`` (FT.SEARCH KNN expressions, FT.HYBRID VSIM)
+        must stay as parameter references so Redis resolves them from PARAMS.
+        """
+        for i, arg in enumerate(cmd):
+            if arg == "$vector" and i > 0 and cmd[i - 1] == "vector":
+                cmd[i] = vector_param
+
+    @staticmethod
     def _has_return_0(args: list[str]) -> bool:
         """Return True when the args contain 'RETURN 0' (no document fields)."""
         try:
@@ -188,17 +236,24 @@ class Executor(_ScoreParseMixin):
                 vector_param = value
                 break
 
-        # Replace $vector placeholder with actual bytes
+        # Replace the $vector PARAMS value with actual bytes (query/VSIM
+        # references to $vector stay as parameter references).
         if vector_param:
-            for i, arg in enumerate(cmd):
-                if arg == "$vector":
-                    cmd[i] = vector_param
+            self._inject_vector_param(cmd, vector_param)
 
         # Execute command
         try:
             raw_result = self._client.execute_command(*cmd)
         except redis.ResponseError as e:
             error_msg = str(e)
+            if translated.command == "FT.HYBRID" and self._is_unknown_command(
+                error_msg
+            ):
+                raise redis.ResponseError(
+                    f"{error_msg}. hybrid_vector_search() translates to FT.HYBRID, "
+                    "which requires Redis 8.4+ (RediSearch with hybrid search) "
+                    "and redis-py >= 7.1.0."
+                ) from e
             _ismissing_signatures = (
                 "Unknown function",
                 "No such function",
@@ -217,10 +272,14 @@ class Executor(_ScoreParseMixin):
             raise
 
         # Parse result based on command type
-        count = raw_result[0] if raw_result else 0
-        rows = []
+        # FT.SEARCH/FT.AGGREGATE replies are arrays with the count first;
+        # FT.HYBRID replies are maps (dict) and set count during parsing below.
+        count = raw_result[0] if isinstance(raw_result, list) and raw_result else 0
+        rows: list[dict] = []
 
-        if translated.command == "FT.SEARCH":
+        if translated.command == "FT.HYBRID":
+            count, rows = self._parse_hybrid_reply(raw_result)
+        elif translated.command == "FT.SEARCH":
             # Use the explicit score_alias signal rather than scanning args
             # for the literal token "WITHSCORES", which could false-positive
             # if a returned field happened to be named "WITHSCORES".
@@ -323,17 +382,24 @@ class AsyncExecutor(_ScoreParseMixin):
                 vector_param = value
                 break
 
-        # Replace $vector placeholder with actual bytes
+        # Replace the $vector PARAMS value with actual bytes (query/VSIM
+        # references to $vector stay as parameter references).
         if vector_param:
-            for i, arg in enumerate(cmd):
-                if arg == "$vector":
-                    cmd[i] = vector_param
+            self._inject_vector_param(cmd, vector_param)
 
         # Execute command asynchronously
         try:
             raw_result = await self._client.execute_command(*cmd)
         except redis.ResponseError as e:
             error_msg = str(e)
+            if translated.command == "FT.HYBRID" and self._is_unknown_command(
+                error_msg
+            ):
+                raise redis.ResponseError(
+                    f"{error_msg}. hybrid_vector_search() translates to FT.HYBRID, "
+                    "which requires Redis 8.4+ (RediSearch with hybrid search) "
+                    "and redis-py >= 7.1.0."
+                ) from e
             _ismissing_signatures = (
                 "Unknown function",
                 "No such function",
@@ -352,10 +418,14 @@ class AsyncExecutor(_ScoreParseMixin):
             raise
 
         # Parse result based on command type
-        count = raw_result[0] if raw_result else 0
-        rows = []
+        # FT.SEARCH/FT.AGGREGATE replies are arrays with the count first;
+        # FT.HYBRID replies are maps (dict) and set count during parsing below.
+        count = raw_result[0] if isinstance(raw_result, list) and raw_result else 0
+        rows: list[dict] = []
 
-        if translated.command == "FT.SEARCH":
+        if translated.command == "FT.HYBRID":
+            count, rows = self._parse_hybrid_reply(raw_result)
+        elif translated.command == "FT.SEARCH":
             with_scores = translated.score_alias is not None
             no_content = self._has_return_0(translated.args)
 

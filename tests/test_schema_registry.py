@@ -247,6 +247,42 @@ class TestSchemaRegistryParsing:
         # Only field2 should be captured (field1 has no type)
         assert schema == {"field2": "TEXT"}
 
+    def test_parse_schema_dict_reply_with_bytes_keys(self):
+        """_parse_schema_from_info handles the redis-py 8.x / RESP3 map reply.
+
+        redis-py 8.x applies a response callback to FT.INFO, returning a dict
+        with bytes keys whose ``attributes`` value is a list of dicts.
+        """
+        fake_info = {
+            b"index_name": b"items",
+            b"attributes": [
+                {b"identifier": b"title", b"attribute": b"title", b"type": b"TEXT"},
+                {b"identifier": b"genre", b"attribute": b"genre", b"type": b"TAG"},
+                {
+                    b"identifier": b"embedding",
+                    b"attribute": b"embedding",
+                    b"type": b"VECTOR",
+                },
+            ],
+        }
+        schema = _parse_schema_from_info(fake_info)
+
+        assert schema == {"title": "TEXT", "genre": "TAG", "embedding": "VECTOR"}
+
+    def test_parse_schema_dict_reply_without_attributes(self):
+        """A dict reply with no attributes section yields an empty schema."""
+        assert _parse_schema_from_info({b"index_name": b"items"}) == {}
+
+    def test_parse_schema_dict_attribute_missing_type(self):
+        """A dict attribute without a type is skipped."""
+        fake_info = {
+            b"attributes": [
+                {b"attribute": b"field1"},  # no type
+                {b"attribute": b"field2", b"type": b"TEXT"},
+            ],
+        }
+        assert _parse_schema_from_info(fake_info) == {"field2": "TEXT"}
+
 
 class TestSchemaRegistryRefresh:
     """Tests for schema refresh functionality."""

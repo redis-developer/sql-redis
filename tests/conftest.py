@@ -9,8 +9,12 @@ from testcontainers.redis import RedisContainer
 
 @pytest.fixture(scope="module")
 def redis_container():
-    """Create a Redis 8 container for testing."""
-    with RedisContainer(image="redis:8.0.2") as container:
+    """Create a Redis 8 container for testing.
+
+    Uses 8.4+ so FT.HYBRID (hybrid_vector_search) integration tests can run;
+    older versions cause those tests to skip via a server-capability check.
+    """
+    with RedisContainer(image="redis:8.4") as container:
         yield container
 
 

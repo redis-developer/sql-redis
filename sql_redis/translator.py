@@ -21,23 +21,39 @@ from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
 
 
+def _fmt_num(value: float) -> str:
+    """Format a numeric FT.HYBRID parameter without trailing float noise."""
+    return f"{value:g}"
+
+
 @dataclass
 class TranslatedQuery:
     """Result of translating SQL to Redis."""
 
-    command: str  # FT.SEARCH or FT.AGGREGATE
+    command: str  # FT.SEARCH, FT.AGGREGATE, or FT.HYBRID
     index: str
     query_string: str
     args: list[str] = field(default_factory=list)
     params: dict[str, object] = field(default_factory=dict)  # Named parameters
     score_alias: str | None = None  # Alias for score column when WITHSCORES is used
+    # FT.HYBRID has no single top-level query string (its SEARCH/VSIM legs live
+    # in args), so it is rendered without the quoted query_string slot.
+    is_hybrid: bool = False
 
     def to_command_list(self) -> list[str]:
         """Return as a list suitable for redis.execute_command()."""
+        if self.is_hybrid:
+            return [self.command, self.index, *self.args]
         return [self.command, self.index, self.query_string, *self.args]
 
     def to_command_string(self) -> str:
         """Return as a human-readable command string."""
+        if self.is_hybrid:
+            # Quote multi-word tokens (the SEARCH query and filter expressions)
+            # for readability; execution uses to_command_list (raw tokens).
+            rendered = [self.command, self.index]
+            rendered.extend(f'"{tok}"' if " " in tok else tok for tok in self.args)
+            return " ".join(rendered)
         parts = [self.command, self.index, f'"{self.query_string}"']
         parts.extend(self.args)
         return " ".join(parts)
@@ -116,6 +132,11 @@ class Translator:
     def _build_command(self, analyzed: AnalyzedQuery) -> TranslatedQuery:
         """Build the Redis command from analyzed query."""
         parsed = analyzed.parsed
+
+        # FT.HYBRID fusion is a dedicated command path with its own
+        # SEARCH/VSIM/COMBINE layout, distinct from FT.SEARCH/FT.AGGREGATE.
+        if analyzed.hybrid_search is not None:
+            return self._build_hybrid(analyzed)
 
         # Validate: geo_distance cannot be combined with OR
         # Geo filters are applied as top-level command args (GEOFILTER/FILTER) and
@@ -508,6 +529,106 @@ class Translator:
             args=args,
             params=params,
             score_alias=(parsed.scoring.alias if parsed.scoring is not None else None),
+        )
+
+    def _build_hybrid(self, analyzed: AnalyzedQuery) -> TranslatedQuery:
+        """Build an FT.HYBRID command from a hybrid_vector_search() query.
+
+        Layout: ``FT.HYBRID index SEARCH "<q>" [SCORER s] VSIM @field $vector
+        [FILTER n <expr>] (KNN|RANGE ...) COMBINE (RRF|LINEAR ...) [LOAD ...]
+        [LIMIT ...] PARAMS 2 vector $vector DIALECT 2``. The WHERE clause is
+        applied to both legs: folded into the SEARCH query and emitted as the
+        VSIM FILTER so the candidate sets agree.
+        """
+        parsed = analyzed.parsed
+        hybrid = analyzed.hybrid_search
+        assert hybrid is not None  # guaranteed by the caller's dispatch check
+        spec = hybrid.spec
+        args: list[str] = []
+
+        # WHERE clause becomes the shared per-leg filter (reuses the standard
+        # query-string builder; vector_search is unset on the hybrid path).
+        filter_expr = self._build_query_string(analyzed)
+        has_filter = bool(filter_expr) and filter_expr != "*"
+
+        # SEARCH leg: tokenized text query, with the filter folded in.
+        text_query = self._query_builder.build_text_condition(
+            spec.text_field, "FULLTEXT", spec.text_query
+        )
+        search_query = f"({text_query}) ({filter_expr})" if has_filter else text_query
+        args.extend(["SEARCH", search_query])
+        if spec.text_scorer:
+            args.extend(["SCORER", spec.text_scorer])
+
+        # VSIM leg: vector field + param placeholder, then the KNN/RANGE method
+        # clause, then the optional per-leg filter (the method must precede
+        # FILTER in the VSIM grammar).
+        args.extend(["VSIM", f"@{spec.vector_field}", "$vector"])
+        if spec.vector_method == "RANGE":
+            assert spec.radius is not None  # parser requires radius for RANGE
+            method_tokens = ["RADIUS", _fmt_num(spec.radius)]
+            if spec.epsilon is not None:
+                method_tokens.extend(["EPSILON", _fmt_num(spec.epsilon)])
+            args.extend(["RANGE", str(len(method_tokens)), *method_tokens])
+        else:
+            method_tokens = ["K", str(hybrid.k)]
+            if spec.ef_runtime is not None:
+                method_tokens.extend(["EF_RUNTIME", str(spec.ef_runtime)])
+            args.extend(["KNN", str(len(method_tokens)), *method_tokens])
+        if has_filter:
+            args.extend(["FILTER", "1", filter_expr])
+
+        # COMBINE: RRF (default) or LINEAR. The combined score is yielded under
+        # the SELECT alias so it comes back as a column.
+        combine_tokens: list[str] = []
+        if spec.combine_method == "LINEAR":
+            if spec.linear_alpha is not None:
+                combine_tokens.extend(
+                    [
+                        "ALPHA",
+                        _fmt_num(spec.linear_alpha),
+                        "BETA",
+                        _fmt_num(1 - spec.linear_alpha),
+                    ]
+                )
+            if spec.rrf_window is not None:
+                combine_tokens.extend(["WINDOW", str(spec.rrf_window)])
+            combine_tokens.extend(["YIELD_SCORE_AS", spec.alias])
+            args.extend(
+                ["COMBINE", "LINEAR", str(len(combine_tokens)), *combine_tokens]
+            )
+        else:
+            if spec.rrf_constant is not None:
+                combine_tokens.extend(["CONSTANT", str(spec.rrf_constant)])
+            if spec.rrf_window is not None:
+                combine_tokens.extend(["WINDOW", str(spec.rrf_window)])
+            combine_tokens.extend(["YIELD_SCORE_AS", spec.alias])
+            args.extend(["COMBINE", "RRF", str(len(combine_tokens)), *combine_tokens])
+
+        # LOAD: the SELECT columns (field names require an @ prefix).
+        load_fields = [f for f in parsed.fields if f != "*"]
+        if load_fields:
+            args.extend(
+                ["LOAD", str(len(load_fields)), *(f"@{f}" for f in load_fields)]
+            )
+
+        # LIMIT (final row cut; KNN K is set separately above).
+        if parsed.limit is not None:
+            args.extend(["LIMIT", str(parsed.offset or 0), str(parsed.limit)])
+
+        # PARAMS placeholder — the executor injects the vector bytes for "vector".
+        # Note: FT.HYBRID rejects an explicit DIALECT argument (the server uses
+        # its configured search-default-dialect), so none is appended here.
+        args.extend(["PARAMS", "2", "vector", "$vector"])
+
+        return TranslatedQuery(
+            command="FT.HYBRID",
+            index=parsed.index,
+            query_string="",
+            args=args,
+            params={"vector": None},
+            score_alias=spec.alias,
+            is_hybrid=True,
         )
 
     def _build_geo_filter_args(self, geo_cond: GeoDistanceCondition) -> list[str]:
