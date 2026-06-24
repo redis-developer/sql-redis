@@ -9,6 +9,7 @@ from sql_redis.parser import (
     ComputedField,
     Condition,
     DateFunctionSpec,
+    HybridSearchSpec,
     ParsedQuery,
 )
 
@@ -23,6 +24,19 @@ class VectorSearchAnalysis:
 
 
 @dataclass
+class HybridSearchAnalysis:
+    """Analyzed FT.HYBRID fusion search details.
+
+    Wraps the parsed spec and adds the resolved KNN ``k`` (from LIMIT). Field
+    types are validated during analysis (text leg must be TEXT, vector leg must
+    be VECTOR).
+    """
+
+    spec: HybridSearchSpec
+    k: int
+
+
+@dataclass
 class AnalyzedQuery:
     """Result of analyzing a parsed SQL query with schema context."""
 
@@ -34,6 +48,7 @@ class AnalyzedQuery:
     groupby_fields: list[str] = field(default_factory=list)
     is_global_aggregation: bool = False
     vector_search: VectorSearchAnalysis | None = None
+    hybrid_search: HybridSearchAnalysis | None = None
     has_prefilter: bool = False
 
     def get_field_type(self, field_name: str) -> str | None:
@@ -121,6 +136,11 @@ class Analyzer:
         if parsed.vector_search:
             referenced_fields.add(parsed.vector_search.field)
 
+        # Fields from hybrid fusion search (both legs)
+        if parsed.hybrid_search:
+            referenced_fields.add(parsed.hybrid_search.vector_field)
+            referenced_fields.add(parsed.hybrid_search.text_field)
+
         # Fields from date functions (YEAR, MONTH, etc.)
         for date_func in parsed.date_functions:
             referenced_fields.add(date_func.field)
@@ -141,6 +161,10 @@ class Analyzer:
             # KNN similarity; the alias is a computed column, not an indexed
             # field, so it must not be looked up in the schema.
             alias_names.add(parsed.vector_search.alias)
+        if parsed.hybrid_search is not None and parsed.hybrid_search.alias:
+            # ORDER BY <combined-score-alias> sorts by the fused score; like the
+            # vector alias, it is a computed column, not an indexed field.
+            alias_names.add(parsed.hybrid_search.alias)
 
         # Fields from GROUP BY (exclude aliases since they're computed)
         for field_name in parsed.groupby_fields:
@@ -178,6 +202,29 @@ class Analyzer:
                 alias=parsed.vector_search.alias,
             )
             # Has prefilter if there are conditions
+            result.has_prefilter = len(parsed.conditions) > 0
+
+        # Analyze hybrid fusion search
+        if parsed.hybrid_search:
+            spec = parsed.hybrid_search
+            vector_type = schema.get(spec.vector_field)
+            if vector_type != "VECTOR":
+                raise ValueError(
+                    f"hybrid_vector_search() vector leg field "
+                    f"'{spec.vector_field}' must be a VECTOR field, "
+                    f"got {vector_type}."
+                )
+            text_type = schema.get(spec.text_field)
+            if text_type != "TEXT":
+                raise ValueError(
+                    f"hybrid_vector_search() text leg field "
+                    f"'{spec.text_field}' must be a TEXT field, got {text_type}."
+                )
+            result.hybrid_search = HybridSearchAnalysis(
+                spec=spec,
+                k=parsed.limit or spec.k or 10,
+            )
+            # Conditions become per-leg filters.
             result.has_prefilter = len(parsed.conditions) > 0
 
         return result

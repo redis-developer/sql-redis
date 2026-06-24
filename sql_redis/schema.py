@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import redis
 
@@ -11,41 +11,74 @@ if TYPE_CHECKING:
     import redis.asyncio as async_redis
 
 
-def _parse_schema_from_info(info: list) -> dict[str, str]:
-    """Parse field types from FT.INFO response.
+def _decode(value: Any) -> Any:
+    """Decode a bytes value to str; pass through everything else."""
+    return value.decode("utf-8") if isinstance(value, bytes) else value
 
-    This is a pure function with no I/O operations, shared by both
-    sync and async schema registries.
+
+def _extract_attributes(info: Any) -> list:
+    """Pull the ``attributes`` section out of an FT.INFO reply.
+
+    Handles both reply shapes: the RESP2 flat list
+    (``[..., 'attributes', [...], ...]``) and the redis-py 8.x / RESP3 map
+    (``{b'attributes': [...], ...}``), whose keys may be bytes or str.
+    """
+    if isinstance(info, dict):
+        for key, val in info.items():
+            if _decode(key) == "attributes":
+                return val or []
+        return []
+    for i, item in enumerate(info):
+        if _decode(item) == "attributes":
+            return info[i + 1]
+    return []
+
+
+def _attribute_name_and_type(attr: Any) -> tuple[str | None, str | None]:
+    """Extract (field_name, field_type) from a single FT.INFO attribute.
+
+    An attribute is either a dict (redis-py 8.x), e.g.
+    ``{b'attribute': b'title', b'type': b'TEXT', ...}``, or a flat list, e.g.
+    ``[b'identifier', b'title', b'attribute', b'title', b'type', b'TEXT', ...]``.
+    """
+    if isinstance(attr, dict):
+        name = next(
+            (_decode(v) for k, v in attr.items() if _decode(k) == "attribute"), None
+        )
+        ftype = next(
+            (_decode(v) for k, v in attr.items() if _decode(k) == "type"), None
+        )
+        return name, ftype
+
+    name = None
+    ftype = None
+    for j, val in enumerate(attr):
+        val_str = _decode(val)
+        if val_str == "attribute" and j + 1 < len(attr):
+            name = _decode(attr[j + 1])
+        if val_str == "type" and j + 1 < len(attr):
+            ftype = _decode(attr[j + 1])
+    return name, ftype
+
+
+def _parse_schema_from_info(info: Any) -> dict[str, str]:
+    """Parse field types from an FT.INFO response.
+
+    This is a pure function with no I/O operations, shared by both the sync
+    and async schema registries. It accepts both the RESP2 list reply and the
+    redis-py 8.x / RESP3 map reply (see ``_extract_attributes``).
 
     Args:
-        info: The raw response from FT.INFO command.
+        info: The raw response from the FT.INFO command (list or dict).
 
     Returns:
         Dictionary mapping field names to their types (e.g., {"title": "TEXT"}).
     """
-    schema = {}
-    # Find the 'attributes' section in the info response
-    for i, item in enumerate(info):
-        # Handle bytes or string comparison
-        item_str = item.decode("utf-8") if isinstance(item, bytes) else item
-        if item_str == "attributes":
-            attributes = info[i + 1]
-            for attr in attributes:
-                field_name = None
-                field_type = None
-                # Each attribute is a list like:
-                # [b'identifier', b'title', b'attribute', b'title', b'type', b'TEXT', ...]
-                for j, val in enumerate(attr):
-                    val_str = val.decode("utf-8") if isinstance(val, bytes) else val
-                    if val_str == "attribute" and j + 1 < len(attr):
-                        fn = attr[j + 1]
-                        field_name = fn.decode("utf-8") if isinstance(fn, bytes) else fn
-                    if val_str == "type" and j + 1 < len(attr):
-                        ft = attr[j + 1]
-                        field_type = ft.decode("utf-8") if isinstance(ft, bytes) else ft
-                if field_name and field_type:
-                    schema[field_name] = field_type
-            break
+    schema: dict[str, str] = {}
+    for attr in _extract_attributes(info):
+        field_name, field_type = _attribute_name_and_type(attr)
+        if field_name and field_type:
+            schema[field_name] = field_type
     return schema
 
 

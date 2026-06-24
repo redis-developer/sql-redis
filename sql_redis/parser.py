@@ -157,6 +157,34 @@ class VectorSearchSpec:
 
 
 @dataclass
+class HybridSearchSpec:
+    """Specification for FT.HYBRID fusion search.
+
+    Populated when a SELECT projection contains
+    ``hybrid_vector_search(<vector_leg>, <text_leg>, <combine>)``. The vector
+    leg reuses ``cosine_distance``/``vector_distance``/``vector_range`` and the
+    text leg reuses ``fulltext``; the third argument is ``rrf(...)`` or
+    ``linear(...)``. Distinct from ``VectorSearchSpec`` (pre-filter hybrid
+    search), which fuses nothing.
+    """
+
+    vector_field: str
+    text_field: str
+    text_query: str
+    alias: str = "hybrid_score"  # combined-score column (the SELECT alias)
+    text_scorer: str = "BM25STD"  # SEARCH scorer
+    vector_method: str = "KNN"  # "KNN" | "RANGE"
+    ef_runtime: int | None = None  # KNN tuning knob
+    radius: float | None = None  # RANGE knob
+    epsilon: float | None = None  # RANGE knob
+    combine_method: str = "RRF"  # "RRF" | "LINEAR"
+    rrf_constant: int | None = None  # RRF knob (server default 60)
+    rrf_window: int | None = None  # fusion window knob (server default 20)
+    linear_alpha: float | None = None  # LINEAR knob; beta derived as (1 - alpha)
+    k: int | None = None  # KNN K, derived from LIMIT by the analyzer
+
+
+@dataclass
 class Condition:
     """A WHERE condition."""
 
@@ -256,6 +284,7 @@ class ParsedQuery:
     computed_fields: list[ComputedField] = dataclasses.field(default_factory=list)
     date_functions: list[DateFunctionSpec] = dataclasses.field(default_factory=list)
     vector_search: VectorSearchSpec | None = None
+    hybrid_search: HybridSearchSpec | None = None
     groupby_fields: list[str] = dataclasses.field(default_factory=list)
     orderby_fields: list[tuple[str, str]] = dataclasses.field(
         default_factory=list
@@ -531,7 +560,10 @@ class SQLParser:
                 "quantile",
                 "random_sample",
             }
-            if func_name_lower == "vector_distance":
+            if func_name_lower == "hybrid_vector_search":
+                # FT.HYBRID fusion: hybrid_vector_search(vector_leg, text_leg, combine)
+                self._process_hybrid_vector_search(expression, result, alias)
+            elif func_name_lower == "vector_distance":
                 # Extract the vector field name from first argument
                 if expression.expressions:
                     first_arg = expression.expressions[0]
@@ -633,6 +665,173 @@ class SQLParser:
                 field=field_name,
                 alias=alias or "vector_distance",
             )
+
+    def _process_hybrid_vector_search(
+        self, expression, result: ParsedQuery, alias: str | None
+    ) -> None:
+        """Process a hybrid_vector_search() call into a HybridSearchSpec.
+
+        Shape: hybrid_vector_search(<vector_leg>, <text_leg>, <combine>) where
+        the vector leg is cosine_distance/vector_distance/vector_range, the text
+        leg is fulltext(field, 'query'), and the optional combine is rrf()/linear().
+        """
+        args = expression.expressions
+        if len(args) < 2:
+            raise ValueError(
+                "hybrid_vector_search() requires a vector leg and a text leg, "
+                "e.g. hybrid_vector_search(cosine_distance(field, :vec), "
+                "fulltext(field, 'query'), rrf())."
+            )
+
+        vector_field, vector_method, ef_runtime, radius, epsilon = (
+            self._parse_hybrid_vector_leg(args[0])
+        )
+        text_field, text_query, text_scorer = self._parse_hybrid_text_leg(args[1])
+        combine_method, rrf_constant, rrf_window, linear_alpha = (
+            self._parse_hybrid_combine(args[2] if len(args) >= 3 else None)
+        )
+
+        result.hybrid_search = HybridSearchSpec(
+            vector_field=vector_field,
+            text_field=text_field,
+            text_query=text_query,
+            alias=alias or "hybrid_score",
+            text_scorer=text_scorer,
+            vector_method=vector_method,
+            ef_runtime=ef_runtime,
+            radius=radius,
+            epsilon=epsilon,
+            combine_method=combine_method,
+            rrf_constant=rrf_constant,
+            rrf_window=rrf_window,
+            linear_alpha=linear_alpha,
+        )
+
+    def _extract_function_kwargs(self, func_expr) -> dict[str, object]:
+        """Return a {name: value} mapping for ``name => value`` kwargs in a call."""
+        kwargs: dict[str, object] = {}
+        for child in func_expr.expressions:
+            if isinstance(child, exp.Kwarg):
+                key = getattr(child.this, "name", None) or str(child.this)
+                kwargs[key.lower()] = self._extract_literal_value(child.expression)
+        return kwargs
+
+    def _parse_hybrid_vector_leg(self, leg):
+        """Parse the vector leg of hybrid_vector_search().
+
+        Returns (field, method, ef_runtime, radius, epsilon).
+        """
+        # cosine_distance()/L2 distance parse as builtins (this == field column).
+        if isinstance(leg, (exp.CosineDistance, exp.Distance)):
+            if not isinstance(leg.this, exp.Column):
+                raise ValueError(
+                    "hybrid_vector_search() vector leg field must be a column name."
+                )
+            return leg.this.name, "KNN", None, None, None
+
+        # vector_distance()/vector_range() parse as anonymous functions, which
+        # (unlike the cosine_distance builtin) accept extra tuning kwargs.
+        if isinstance(leg, exp.Anonymous):
+            name = leg.name.lower()
+            if name not in ("vector_distance", "cosine_distance", "vector_range"):
+                raise ValueError(
+                    "hybrid_vector_search() first argument must be a vector leg "
+                    "(cosine_distance, vector_distance, or vector_range), "
+                    f"got {leg.name}()."
+                )
+            field_node = leg.expressions[0] if leg.expressions else None
+            if not isinstance(field_node, exp.Column):
+                raise ValueError(
+                    "hybrid_vector_search() vector leg field must be a column name."
+                )
+            kwargs = self._extract_function_kwargs(leg)
+            if name == "vector_range":
+                radius = kwargs.get("radius")
+                if radius is None:
+                    raise ValueError(
+                        "vector_range() requires a radius, e.g. "
+                        "vector_range(field, :vec, radius => 0.2)."
+                    )
+                epsilon = kwargs.get("epsilon")
+                return (
+                    field_node.name,
+                    "RANGE",
+                    None,
+                    float(radius),
+                    float(epsilon) if epsilon is not None else None,
+                )
+            ef = kwargs.get("ef_runtime")
+            return (
+                field_node.name,
+                "KNN",
+                int(ef) if ef is not None else None,
+                None,
+                None,
+            )
+
+        raise ValueError(
+            "hybrid_vector_search() first argument must be a vector leg, "
+            "e.g. cosine_distance(field, :vec)."
+        )
+
+    def _parse_hybrid_text_leg(self, leg):
+        """Parse the fulltext() text leg. Returns (field, query, scorer)."""
+        if not isinstance(leg, exp.Anonymous) or leg.name.lower() != "fulltext":
+            raise ValueError(
+                "hybrid_vector_search() second argument must be "
+                "fulltext(field, 'query')."
+            )
+        if len(leg.expressions) < 2:
+            raise ValueError(
+                "fulltext() in hybrid_vector_search() requires a field and a "
+                "query string."
+            )
+        field_node = leg.expressions[0]
+        if not isinstance(field_node, exp.Column):
+            raise ValueError("fulltext() field must be a column name.")
+        query_val = self._extract_literal_value(leg.expressions[1])
+        if not isinstance(query_val, str):
+            raise ValueError("fulltext() query must be a string literal.")
+        kwargs = self._extract_function_kwargs(leg)
+        scorer = kwargs.get("scorer", "BM25STD")
+        return field_node.name, query_val, str(scorer)
+
+    def _parse_hybrid_combine(self, combine):
+        """Parse the optional rrf()/linear() combine.
+
+        Returns (method, rrf_constant, rrf_window, linear_alpha). When ``combine``
+        is None the server default (RRF) applies.
+        """
+        if combine is None:
+            return "RRF", None, None, None
+        if not isinstance(combine, exp.Anonymous):
+            raise ValueError(
+                "hybrid_vector_search() fusion argument must be rrf(...) or "
+                "linear(...)."
+            )
+        name = combine.name.lower()
+        kwargs = self._extract_function_kwargs(combine)
+        window = kwargs.get("window")
+        rrf_window = int(window) if window is not None else None
+        if name == "rrf":
+            constant = kwargs.get("constant")
+            return (
+                "RRF",
+                int(constant) if constant is not None else None,
+                rrf_window,
+                None,
+            )
+        if name == "linear":
+            alpha = kwargs.get("alpha")
+            return (
+                "LINEAR",
+                None,
+                rrf_window,
+                float(alpha) if alpha is not None else None,
+            )
+        raise ValueError(
+            f"Unknown fusion method {combine.name}(). Use rrf(...) or linear(...)."
+        )
 
     def _process_geo_distance_select(
         self, expression, result: ParsedQuery, alias: str | None
