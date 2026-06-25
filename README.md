@@ -66,7 +66,8 @@ Pass `decode_responses=True` to the `Redis` client if you want string keys inste
 - [x] `LIMIT` and `OFFSET` pagination
 - [x] Computed fields: `price * 0.9 AS discounted`
 - [x] Vector KNN search: `vector_distance(field, :param)`
-- [x] Hybrid search (filters + vector)
+- [x] Pre-filter hybrid search (filters + vector KNN)
+- [x] Hybrid fusion search: `hybrid_vector_search(...)` to `FT.HYBRID` (text + vector fused via RRF/LINEAR, requires Redis 8.4+)
 - [x] Full-text search: exact phrase, fuzzy, proximity, OR/union, LIKE patterns, BM25 scoring
 - [x] GEO field queries with full operator support
 - [x] Date functions: `YEAR()`, `MONTH()`, `DAY()`, `DATE_FORMAT()`, etc.
