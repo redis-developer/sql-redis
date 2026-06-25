@@ -311,7 +311,9 @@ class Executor(_ScoreParseMixin):
                 parsed_rows: list[tuple[dict, Any]] = []
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
-                    row_data = raw_result[i + 2]
+                    # A nil field-array (e.g. doc expired mid-query) becomes an
+                    # empty field set, keeping the row's score instead of crashing.
+                    row_data = raw_result[i + 2] or []
                     row = dict(zip(row_data[::2], row_data[1::2]))
                     all_field_names.update(row.keys())
                     parsed_rows.append((row, score))
@@ -326,12 +328,13 @@ class Executor(_ScoreParseMixin):
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
                 for i in range(2, len(raw_result), 2):
-                    row_data = raw_result[i]
+                    row_data = raw_result[i] or []
                     row = dict(zip(row_data[::2], row_data[1::2]))
                     rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:
+                row_data = row_data or []
                 row = dict(zip(row_data[::2], row_data[1::2]))
                 rows.append(row)
 
@@ -448,7 +451,9 @@ class AsyncExecutor(_ScoreParseMixin):
                 parsed_rows: list[tuple[dict, Any]] = []
                 for i in range(1, len(raw_result) - 2, 3):
                     score = raw_result[i + 1]
-                    row_data = raw_result[i + 2]
+                    # A nil field-array (e.g. doc expired mid-query) becomes an
+                    # empty field set, keeping the row's score instead of crashing.
+                    row_data = raw_result[i + 2] or []
                     row = dict(zip(row_data[::2], row_data[1::2]))
                     all_field_names.update(row.keys())
                     parsed_rows.append((row, score))
@@ -463,12 +468,13 @@ class AsyncExecutor(_ScoreParseMixin):
             else:
                 # Standard format: [count, key1, [fields1], key2, [fields2], ...]
                 for i in range(2, len(raw_result), 2):
-                    row_data = raw_result[i]
+                    row_data = raw_result[i] or []
                     row = dict(zip(row_data[::2], row_data[1::2]))
                     rows.append(row)
         else:
             # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
             for row_data in raw_result[1:]:
+                row_data = row_data or []
                 row = dict(zip(row_data[::2], row_data[1::2]))
                 rows.append(row)
 
