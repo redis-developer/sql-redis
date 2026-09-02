@@ -13,6 +13,33 @@ not "fix" this in `executor.py` by force-decoding; that breaks users who
 deliberately want bytes (binary fields, vectors). See
 [Result shape](../concepts/result-shape.md) for the full story.
 
+## Reply shape depends on the RESP protocol, not on library configuration
+
+`sql_redis` sends FT.* commands with `client.execute_command` and reads the raw
+reply. redis-py registers no `FT.SEARCH` / `FT.AGGREGATE` response callback on
+the base client. `Search.search()` calls `execute_command` and then its own
+`_parse_results`, so the executor receives the wire shape verbatim: a flat
+array on RESP2, a map on RESP3.
+
+`_parse_reply` therefore dispatches on the shape of the reply
+(`isinstance(raw_result, dict)`), and `_resp3_to_resp2` folds a map back into
+the array shape so one parser handles both. Do not "simplify" this into a
+single unconditional path, and do not replace the shape check with a protocol
+check on the connection: sniffing `connection_kwargs["protocol"]` is wrong for
+cluster and sentinel clients, and it cannot distinguish redis-py 8's four
+callback modes (`protocol=2`, protocol unset, `protocol=3`,
+`legacy_responses=False`).
+
+Routing through `client.ft(index)` does not help. On redis-py 7.4 and earlier
+`_parse_results` returns the raw map unchanged under RESP3, and on redis-py 8
+the `protocol=3` callback table has no `FT.AGGREGATE` entry at all.
+
+Structural map keys (`total_results`, `results`, `id`, `score`,
+`extra_attributes`) arrive as `bytes` when the client has
+`decode_responses=False`, which is why `_map_get` probes both key types. Reading
+only `str` keys fails silently with zero rows rather than raising; that is
+exactly the bug redis-py shipped in 8.0.0 (redis-py#4107).
+
 ## Stopwords are silently stripped
 
 `WHERE title = 'bank of america'` becomes `@title:"bank america"` because

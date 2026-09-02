@@ -69,7 +69,7 @@ tests/
 | `IS NULL`, `IS NOT NULL`, `exists()` | `parser.py`, `query_builder.py` |
 | Parameter substitution | `executor.py::_substitute_params` |
 | FT.SEARCH vs FT.AGGREGATE branching | `translator.py::translate_parsed` (the `use_aggregate` boolean) |
-| Result-row parsing | `executor.py::Executor.execute` (the four parsing branches: WITHSCORES + RETURN 0, WITHSCORES, plain SEARCH, AGGREGATE) |
+| Result-row parsing | `executor.py::_ScoreParseMixin` (`_parse_reply` dispatches by reply shape; `_parse_array_reply` holds the four branches: WITHSCORES + RETURN 0, WITHSCORES, plain SEARCH, AGGREGATE; `_resp3_to_resp2` folds a RESP3 map into the array shape) |
 
 ## What to read before changing X
 

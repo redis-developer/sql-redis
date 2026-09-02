@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import redis
 
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
-from sql_redis.translator import Translator
+from sql_redis.translator import TranslatedQuery, Translator
 
 if TYPE_CHECKING:
     import redis.asyncio as async_redis
@@ -107,6 +107,36 @@ def _substitute_params(sql: str, params: dict[str, Any]) -> str:
     return "".join(result)
 
 
+def _map_get(mapping: dict, key: str, default: Any = None) -> Any:
+    """Look up a RESP3 map key, tolerating bytes keys.
+
+    RESP3 replies arrive as maps whose *structural* keys (``total_results``,
+    ``results``, ``id``, ``score``, ``extra_attributes``) are ``str`` when the
+    client decodes responses and ``bytes`` when it does not. Document *field*
+    keys never go through this helper: they reach the caller exactly as
+    received, so a ``decode_responses=False`` client still gets bytes keys.
+    """
+    if key in mapping:
+        return mapping[key]
+    return mapping.get(key.encode(), default)
+
+
+def _extra_attributes(result_item: Any) -> list:
+    """Flatten a RESP3 result's ``extra_attributes`` map into a field array.
+
+    Returns the ``[field, value, field, value, ...]`` shape the RESP2 parser
+    expects. An absent or non-map ``extra_attributes`` (RETURN 0 suppresses it,
+    and a document expiring mid-query can null it) becomes an empty array,
+    matching the RESP2 path's tolerance for a nil field-array.
+    """
+    if not isinstance(result_item, dict):
+        return []
+    fields = _map_get(result_item, "extra_attributes")
+    if not isinstance(fields, dict):
+        return []
+    return [item for pair in fields.items() for item in pair]
+
+
 @dataclass
 class QueryResult:
     """Result of executing a SQL query."""
@@ -140,13 +170,8 @@ class _ScoreParseMixin:
         else:
             reply = dict(zip(raw_result[::2], raw_result[1::2]))
 
-        def _field(name: str):
-            if name in reply:
-                return reply[name]
-            return reply.get(name.encode())
-
-        count = _field("total_results") or 0
-        results = _field("results") or []
+        count = _map_get(reply, "total_results") or 0
+        results = _map_get(reply, "results") or []
         rows = [
             dict(row) if isinstance(row, dict) else dict(zip(row[::2], row[1::2]))
             for row in results
@@ -204,6 +229,140 @@ class _ScoreParseMixin:
         while alias in return_fields:
             alias = f"__score_{alias}"
         return alias
+
+    @staticmethod
+    def _resp3_to_resp2(reply: dict, translated: TranslatedQuery) -> list:
+        """Rewrite a RESP3 FT.SEARCH / FT.AGGREGATE map as the RESP2 array.
+
+        A RESP3 reply is a map::
+
+            {total_results: N, attributes: [...], format: ..., warning: [...],
+             results: [{id: key, score: 0.5, extra_attributes: {field: val},
+                        values: [...]}, ...]}
+
+        Rather than parse that shape separately, fold it back into the flat
+        array RESP2 sends so a single parser handles both wire protocols. The
+        emitted layout mirrors the branch the array parser will take: the
+        document key, then the score when WITHSCORES was requested, then the
+        field array unless RETURN 0 suppressed document fields. ``values`` is
+        never read, and ``id`` lands in the position the parser discards.
+
+        Values are moved, not converted, so a RESP3 score stays a float and
+        document field keys keep whatever type the client returned.
+        """
+        response: list = [_map_get(reply, "total_results", 0)]
+        results = _map_get(reply, "results") or []
+
+        if translated.command != "FT.SEARCH":
+            # FT.AGGREGATE rows carry only extra_attributes: no id, no score.
+            response.extend(_extra_attributes(item) for item in results)
+            return response
+
+        with_scores = translated.score_alias is not None
+        no_content = _ScoreParseMixin._has_return_0(translated.args)
+        for item in results:
+            response.append(_map_get(item, "id", "") if isinstance(item, dict) else "")
+            if with_scores:
+                response.append(
+                    _map_get(item, "score") if isinstance(item, dict) else None
+                )
+            if not no_content:
+                response.append(_extra_attributes(item))
+        return response
+
+    @staticmethod
+    def _parse_array_reply(
+        raw_result: Any, translated: TranslatedQuery
+    ) -> tuple[Any, list[dict]]:
+        """Parse the flat-array FT.SEARCH / FT.AGGREGATE reply into rows.
+
+        This is the RESP2 wire shape, and the shape ``_resp3_to_resp2`` folds a
+        RESP3 map into, so it is the only row-assembly path in the executor.
+        """
+        count = raw_result[0] if isinstance(raw_result, list) and raw_result else 0
+        rows: list[dict] = []
+
+        if translated.command == "FT.SEARCH":
+            # Use the explicit score_alias signal rather than scanning args
+            # for the literal token "WITHSCORES", which could false-positive
+            # if a returned field happened to be named "WITHSCORES".
+            with_scores = translated.score_alias is not None
+            # RETURN 0 suppresses document fields (like NOCONTENT);
+            # with WITHSCORES the reply is [count, id, score, id, score, ...]
+            no_content = _ScoreParseMixin._has_return_0(translated.args)
+
+            if with_scores and no_content:
+                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
+                # Stride of 2: key, score (no field array)
+                score_alias = _ScoreParseMixin._resolve_score_alias(
+                    translated.score_alias, translated.args
+                )
+                for i in range(1, len(raw_result) - 1, 2):
+                    score = raw_result[i + 1]
+                    row = {score_alias: score}
+                    rows.append(row)
+            elif with_scores:
+                # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
+                # Stride of 3: key, score, field_list
+                # First pass: collect all field names across all rows so the
+                # alias avoids collisions with any document field, not just
+                # the first row's fields.
+                all_field_names: set[str] = set()
+                parsed_rows: list[tuple[dict, Any]] = []
+                for i in range(1, len(raw_result) - 2, 3):
+                    score = raw_result[i + 1]
+                    # A nil field-array (e.g. doc expired mid-query) becomes an
+                    # empty field set, keeping the row's score instead of crashing.
+                    row_data = raw_result[i + 2] or []
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    all_field_names.update(row.keys())
+                    parsed_rows.append((row, score))
+                resolved_alias = _ScoreParseMixin._resolve_score_alias(
+                    translated.score_alias,
+                    translated.args,
+                    first_row_fields=all_field_names,
+                )
+                for row, score in parsed_rows:
+                    row[resolved_alias] = score
+                    rows.append(row)
+            else:
+                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
+                for i in range(2, len(raw_result), 2):
+                    row_data = raw_result[i] or []
+                    row = dict(zip(row_data[::2], row_data[1::2]))
+                    rows.append(row)
+        else:
+            # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
+            for row_data in raw_result[1:]:
+                row_data = row_data or []
+                row = dict(zip(row_data[::2], row_data[1::2]))
+                rows.append(row)
+
+        return count, rows
+
+    @staticmethod
+    def _parse_reply(raw_result: Any, translated: TranslatedQuery) -> QueryResult:
+        """Turn a raw FT.* reply into a QueryResult, RESP2 or RESP3.
+
+        Dispatch is by reply *shape*, not by asking the connection which
+        protocol it negotiated. redis-py registers no FT.SEARCH / FT.AGGREGATE
+        callback on the base client: ``Search.search()`` calls
+        ``execute_command`` and then its own ``_parse_results``, so a raw
+        ``execute_command`` receives the wire shape verbatim in every redis-py
+        version, a flat array on RESP2 and a map on RESP3. Shape dispatch needs no
+        version check, works for cluster and sentinel clients, and survives a
+        future redis-py that hands back the flat array on RESP3 too.
+
+        FT.HYBRID keeps its own parser: its RESP3 rows are flat field maps,
+        not the ``{id, extra_attributes}`` documents FT.SEARCH returns.
+        """
+        if translated.command == "FT.HYBRID":
+            count, rows = _ScoreParseMixin._parse_hybrid_reply(raw_result)
+        else:
+            if isinstance(raw_result, dict):
+                raw_result = _ScoreParseMixin._resp3_to_resp2(raw_result, translated)
+            count, rows = _ScoreParseMixin._parse_array_reply(raw_result, translated)
+        return QueryResult(rows=rows, count=count)
 
 
 class Executor(_ScoreParseMixin):
@@ -271,74 +430,9 @@ class Executor(_ScoreParseMixin):
                 ) from e
             raise
 
-        # Parse result based on command type
-        # FT.SEARCH/FT.AGGREGATE replies are arrays with the count first;
-        # FT.HYBRID replies are maps (dict) and set count during parsing below.
-        count = raw_result[0] if isinstance(raw_result, list) and raw_result else 0
-        rows: list[dict] = []
-
-        if translated.command == "FT.HYBRID":
-            count, rows = self._parse_hybrid_reply(raw_result)
-        elif translated.command == "FT.SEARCH":
-            # Use the explicit score_alias signal rather than scanning args
-            # for the literal token "WITHSCORES", which could false-positive
-            # if a returned field happened to be named "WITHSCORES".
-            with_scores = translated.score_alias is not None
-            # RETURN 0 suppresses document fields (like NOCONTENT);
-            # with WITHSCORES the reply is [count, id, score, id, score, ...]
-            no_content = self._has_return_0(translated.args)
-
-            # Pre-resolve score alias; may be deferred for SELECT *
-            score_alias: str | None = None
-
-            if with_scores and no_content:
-                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
-                # Stride of 2: key, score (no field array)
-                score_alias = self._resolve_score_alias(
-                    translated.score_alias, translated.args
-                )
-                for i in range(1, len(raw_result) - 1, 2):
-                    score = raw_result[i + 1]
-                    row = {score_alias: score}
-                    rows.append(row)
-            elif with_scores:
-                # WITHSCORES format: [count, key1, score1, [fields1], key2, score2, [fields2], ...]
-                # Stride of 3: key, score, field_list
-                # First pass: collect all field names across all rows so the
-                # alias avoids collisions with any document field, not just
-                # the first row's fields.
-                all_field_names: set[str] = set()
-                parsed_rows: list[tuple[dict, Any]] = []
-                for i in range(1, len(raw_result) - 2, 3):
-                    score = raw_result[i + 1]
-                    # A nil field-array (e.g. doc expired mid-query) becomes an
-                    # empty field set, keeping the row's score instead of crashing.
-                    row_data = raw_result[i + 2] or []
-                    row = dict(zip(row_data[::2], row_data[1::2]))
-                    all_field_names.update(row.keys())
-                    parsed_rows.append((row, score))
-                resolved_alias = self._resolve_score_alias(
-                    translated.score_alias,
-                    translated.args,
-                    first_row_fields=all_field_names,
-                )
-                for row, score in parsed_rows:
-                    row[resolved_alias] = score
-                    rows.append(row)
-            else:
-                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
-                for i in range(2, len(raw_result), 2):
-                    row_data = raw_result[i] or []
-                    row = dict(zip(row_data[::2], row_data[1::2]))
-                    rows.append(row)
-        else:
-            # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
-            for row_data in raw_result[1:]:
-                row_data = row_data or []
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
-
-        return QueryResult(rows=rows, count=count)
+        # Parse the reply. Shape dispatch happens in _parse_reply: RESP2 sends
+        # a flat array, RESP3 sends a map, and both reach the same row parser.
+        return self._parse_reply(raw_result, translated)
 
 
 class AsyncExecutor(_ScoreParseMixin):
@@ -420,65 +514,9 @@ class AsyncExecutor(_ScoreParseMixin):
                 ) from e
             raise
 
-        # Parse result based on command type
-        # FT.SEARCH/FT.AGGREGATE replies are arrays with the count first;
-        # FT.HYBRID replies are maps (dict) and set count during parsing below.
-        count = raw_result[0] if isinstance(raw_result, list) and raw_result else 0
-        rows: list[dict] = []
-
-        if translated.command == "FT.HYBRID":
-            count, rows = self._parse_hybrid_reply(raw_result)
-        elif translated.command == "FT.SEARCH":
-            with_scores = translated.score_alias is not None
-            no_content = self._has_return_0(translated.args)
-
-            score_alias: str | None = None
-
-            if with_scores and no_content:
-                # WITHSCORES + RETURN 0: [count, id1, score1, id2, score2, ...]
-                score_alias = self._resolve_score_alias(
-                    translated.score_alias, translated.args
-                )
-                for i in range(1, len(raw_result) - 1, 2):
-                    score = raw_result[i + 1]
-                    row = {score_alias: score}
-                    rows.append(row)
-            elif with_scores:
-                # WITHSCORES format: [count, key1, score1, [fields1], ...]
-                # First pass: collect all field names across all rows so the
-                # alias avoids collisions with any document field.
-                all_field_names: set[str] = set()
-                parsed_rows: list[tuple[dict, Any]] = []
-                for i in range(1, len(raw_result) - 2, 3):
-                    score = raw_result[i + 1]
-                    # A nil field-array (e.g. doc expired mid-query) becomes an
-                    # empty field set, keeping the row's score instead of crashing.
-                    row_data = raw_result[i + 2] or []
-                    row = dict(zip(row_data[::2], row_data[1::2]))
-                    all_field_names.update(row.keys())
-                    parsed_rows.append((row, score))
-                resolved_alias = self._resolve_score_alias(
-                    translated.score_alias,
-                    translated.args,
-                    first_row_fields=all_field_names,
-                )
-                for row, score in parsed_rows:
-                    row[resolved_alias] = score
-                    rows.append(row)
-            else:
-                # Standard format: [count, key1, [fields1], key2, [fields2], ...]
-                for i in range(2, len(raw_result), 2):
-                    row_data = raw_result[i] or []
-                    row = dict(zip(row_data[::2], row_data[1::2]))
-                    rows.append(row)
-        else:
-            # FT.AGGREGATE format: [count, [fields1], [fields2], ...]
-            for row_data in raw_result[1:]:
-                row_data = row_data or []
-                row = dict(zip(row_data[::2], row_data[1::2]))
-                rows.append(row)
-
-        return QueryResult(rows=rows, count=count)
+        # Parse the reply. Shape dispatch happens in _parse_reply: RESP2 sends
+        # a flat array, RESP3 sends a map, and both reach the same row parser.
+        return self._parse_reply(raw_result, translated)
 
 
 def create_executor(

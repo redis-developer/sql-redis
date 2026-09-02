@@ -1,10 +1,14 @@
 """Pytest configuration and fixtures."""
 
 import struct
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import redis
 from testcontainers.redis import RedisContainer
+
+from sql_redis.executor import AsyncExecutor, Executor
+from sql_redis.translator import TranslatedQuery
 
 
 @pytest.fixture(scope="module")
@@ -358,3 +362,52 @@ def items_data(redis_client: redis.Redis, items_index: str):
 
     binary_client.close()
     return items_index
+
+
+def make_stub_executor(translated: TranslatedQuery, raw_result) -> Executor:
+    """Build an Executor whose translation and Redis reply are stubbed.
+
+    Feeds a crafted reply straight through the parser, so every parse branch
+    can be exercised deterministically without a live Redis server. Exposed as
+    the ``stub_executor`` fixture.
+    """
+    executor = Executor.__new__(Executor)
+    executor._client = MagicMock()
+    executor._client.execute_command.return_value = raw_result
+    executor._schema_registry = MagicMock()
+    executor._translator = MagicMock()
+    executor._translator.translate.return_value = translated
+    return executor
+
+
+def make_stub_async_executor(translated: TranslatedQuery, raw_result) -> AsyncExecutor:
+    """Build an AsyncExecutor whose translation and Redis reply are stubbed.
+
+    The async seam differs from the sync one: ``AsyncExecutor.execute`` parses
+    first, awaits ``ensure_schema`` when the query names an index, and only then
+    translates the pre-parsed result. Exposed as the ``stub_async_executor``
+    fixture.
+    """
+    executor = AsyncExecutor.__new__(AsyncExecutor)
+    executor._client = MagicMock()
+    executor._client.execute_command = AsyncMock(return_value=raw_result)
+    executor._schema_registry = MagicMock()
+    executor._schema_registry.ensure_schema = AsyncMock()
+    executor._translator = MagicMock()
+    parsed = MagicMock()
+    parsed.index = None  # skip ensure_schema()
+    executor._translator.parse.return_value = parsed
+    executor._translator.translate_parsed.return_value = translated
+    return executor
+
+
+@pytest.fixture
+def stub_executor():
+    """Factory fixture returning :func:`make_stub_executor`."""
+    return make_stub_executor
+
+
+@pytest.fixture
+def stub_async_executor():
+    """Factory fixture returning :func:`make_stub_async_executor`."""
+    return make_stub_async_executor

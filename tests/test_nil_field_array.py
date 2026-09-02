@@ -9,42 +9,12 @@ failed.
 
 These tests feed crafted replies (with a nil field-array) straight through the
 parser by mocking the translator and client, so every parse branch is exercised
-deterministically without a live Redis server.
+deterministically without a live Redis server. The ``stub_executor`` /
+``stub_async_executor`` factory fixtures live in ``conftest.py``; the RESP3
+equivalents of these cases are in ``test_reply_shapes.py``.
 """
 
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
-
-from sql_redis.executor import AsyncExecutor, Executor
 from sql_redis.translator import TranslatedQuery
-
-
-def _make_sync_executor(translated: TranslatedQuery, raw_result):
-    """Build an Executor whose translation and Redis reply are stubbed."""
-    executor = Executor.__new__(Executor)
-    executor._client = MagicMock()
-    executor._client.execute_command.return_value = raw_result
-    executor._schema_registry = MagicMock()
-    executor._translator = MagicMock()
-    executor._translator.translate.return_value = translated
-    return executor
-
-
-def _make_async_executor(translated: TranslatedQuery, raw_result):
-    """Build an AsyncExecutor whose translation and Redis reply are stubbed."""
-    executor = AsyncExecutor.__new__(AsyncExecutor)
-    executor._client = MagicMock()
-    executor._client.execute_command = AsyncMock(return_value=raw_result)
-    executor._schema_registry = MagicMock()
-    executor._schema_registry.ensure_schema = AsyncMock()
-    executor._translator = MagicMock()
-    # AsyncExecutor.execute parses first, then translates the parsed result.
-    parsed = MagicMock()
-    parsed.index = None  # skip ensure_schema()
-    executor._translator.parse.return_value = parsed
-    executor._translator.translate_parsed.return_value = translated
-    return executor
 
 
 class TestStandardSearchNilFields:
@@ -57,19 +27,19 @@ class TestStandardSearchNilFields:
             query_string="*",
         )
 
-    def test_sync_tolerates_nil_field_array(self):
+    def test_sync_tolerates_nil_field_array(self, stub_executor):
         # Second document's field-array came back nil.
         raw_result = [2, "product:1", ["title", "Laptop"], "product:2", None]
-        executor = _make_sync_executor(self._translated(), raw_result)
+        executor = stub_executor(self._translated(), raw_result)
 
         result = executor.execute("SELECT * FROM products")
 
         assert result.count == 2
         assert result.rows == [{"title": "Laptop"}, {}]
 
-    async def test_async_tolerates_nil_field_array(self):
+    async def test_async_tolerates_nil_field_array(self, stub_async_executor):
         raw_result = [2, "product:1", ["title", "Laptop"], "product:2", None]
-        executor = _make_async_executor(self._translated(), raw_result)
+        executor = stub_async_executor(self._translated(), raw_result)
 
         result = await executor.execute("SELECT * FROM products")
 
@@ -88,7 +58,7 @@ class TestWithScoresNilFields:
             score_alias="score",
         )
 
-    def test_sync_keeps_score_when_fields_nil(self):
+    def test_sync_keeps_score_when_fields_nil(self, stub_executor):
         raw_result = [
             2,
             "product:1",
@@ -98,7 +68,7 @@ class TestWithScoresNilFields:
             "0.9",
             None,
         ]
-        executor = _make_sync_executor(self._translated(), raw_result)
+        executor = stub_executor(self._translated(), raw_result)
 
         result = executor.execute("SELECT * FROM products")
 
@@ -108,7 +78,7 @@ class TestWithScoresNilFields:
             {"score": "0.9"},
         ]
 
-    async def test_async_keeps_score_when_fields_nil(self):
+    async def test_async_keeps_score_when_fields_nil(self, stub_async_executor):
         raw_result = [
             2,
             "product:1",
@@ -118,7 +88,7 @@ class TestWithScoresNilFields:
             "0.9",
             None,
         ]
-        executor = _make_async_executor(self._translated(), raw_result)
+        executor = stub_async_executor(self._translated(), raw_result)
 
         result = await executor.execute("SELECT * FROM products")
 
@@ -139,18 +109,18 @@ class TestAggregateNilFields:
             query_string="*",
         )
 
-    def test_sync_tolerates_nil_row(self):
+    def test_sync_tolerates_nil_row(self, stub_executor):
         raw_result = [2, ["category", "books"], None]
-        executor = _make_sync_executor(self._translated(), raw_result)
+        executor = stub_executor(self._translated(), raw_result)
 
         result = executor.execute("SELECT category FROM products GROUP BY category")
 
         assert result.count == 2
         assert result.rows == [{"category": "books"}, {}]
 
-    async def test_async_tolerates_nil_row(self):
+    async def test_async_tolerates_nil_row(self, stub_async_executor):
         raw_result = [2, ["category", "books"], None]
-        executor = _make_async_executor(self._translated(), raw_result)
+        executor = stub_async_executor(self._translated(), raw_result)
 
         result = await executor.execute(
             "SELECT category FROM products GROUP BY category"
