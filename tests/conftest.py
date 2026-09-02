@@ -368,12 +368,16 @@ def make_stub_executor(translated: TranslatedQuery, raw_result) -> Executor:
     """Build an Executor whose translation and Redis reply are stubbed.
 
     Feeds a crafted reply straight through the parser, so every parse branch
-    can be exercised deterministically without a live Redis server. Exposed as
-    the ``stub_executor`` fixture.
+    can be exercised deterministically without a live Redis server. Pass an
+    exception as ``raw_result`` to exercise the error paths. Exposed as the
+    ``stub_executor`` fixture.
     """
     executor = Executor.__new__(Executor)
     executor._client = MagicMock()
-    executor._client.execute_command.return_value = raw_result
+    if isinstance(raw_result, BaseException):
+        executor._client.execute_command.side_effect = raw_result
+    else:
+        executor._client.execute_command.return_value = raw_result
     executor._schema_registry = MagicMock()
     executor._translator = MagicMock()
     executor._translator.translate.return_value = translated
@@ -385,12 +389,15 @@ def make_stub_async_executor(translated: TranslatedQuery, raw_result) -> AsyncEx
 
     The async seam differs from the sync one: ``AsyncExecutor.execute`` parses
     first, awaits ``ensure_schema`` when the query names an index, and only then
-    translates the pre-parsed result. Exposed as the ``stub_async_executor``
-    fixture.
+    translates the pre-parsed result. Pass an exception as ``raw_result`` to
+    exercise the error paths. Exposed as the ``stub_async_executor`` fixture.
     """
     executor = AsyncExecutor.__new__(AsyncExecutor)
     executor._client = MagicMock()
-    executor._client.execute_command = AsyncMock(return_value=raw_result)
+    if isinstance(raw_result, BaseException):
+        executor._client.execute_command = AsyncMock(side_effect=raw_result)
+    else:
+        executor._client.execute_command = AsyncMock(return_value=raw_result)
     executor._schema_registry = MagicMock()
     executor._schema_registry.ensure_schema = AsyncMock()
     executor._translator = MagicMock()

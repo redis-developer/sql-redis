@@ -1,10 +1,8 @@
 """Reply-shape tests for RESP2 arrays and RESP3 maps.
 
-``sql_redis`` sends FT.* commands with ``client.execute_command`` and reads the
-raw reply, because redis-py registers no FT.SEARCH / FT.AGGREGATE callback on
-the base client. The reply shape therefore follows the negotiated protocol: a
-flat array on RESP2, a map on RESP3. The executor folds the map back into the
-array shape (``_resp3_to_resp2``) so a single parser handles both.
+The reply shape follows the protocol the client negotiated: a flat array on
+RESP2, a map on RESP3. See ``docs/for-ais-only/FAILURE_MODES.md`` for why the
+executor sees the raw shape at all.
 
 Every canned reply below was captured from a real Redis 8.4.6 server rather
 than hand-written, with the producing cell named in a comment. Reply shapes are
@@ -12,11 +10,14 @@ the whole subject here, so an invented literal would only encode the assumption
 under test. Replies marked "derived" are a captured reply with one documented
 mutation, to reach a case the server does not produce on demand.
 
-The nil-field-array cases for the RESP2 array shape live in
-``test_nil_field_array.py``.
+``test_protocol_matrix.py`` proves these are the shapes Redis really sends; the
+nil-field-array cases for the array shape live in ``test_nil_field_array.py``.
 """
 
 import pytest
+import redis
+
+pytestmark = pytest.mark.protocol
 
 from sql_redis.translator import TranslatedQuery
 
@@ -163,10 +164,56 @@ RESP3_SEARCH_MISSING_FIELDS = {
     "warning": [],
 }
 
+# Cell: redis-py 8.1.0, protocol=3, decode_responses=True, redis:8.4
+# SELECT title FROM cnt_idx ORDER BY price ASC LIMIT 2, over 5 matching documents.
+# total_results is the total match count, not the number of rows returned, so
+# this is the capture that catches count being derived from len(results).
+RESP3_SEARCH_LIMITED = {
+    "attributes": [],
+    "format": "STRING",
+    "results": [
+        {"id": "ci:0", "extra_attributes": {"title": "book 0"}, "values": []},
+        {"id": "ci:1", "extra_attributes": {"title": "book 1"}, "values": []},
+    ],
+    "total_results": 5,
+    "warning": [],
+}
+
+# Cell: redis-py 8.1.0, protocol=2, decode_responses=True, redis:8.4
+# Same query. RESP2 puts the same total at position 0.
+RESP2_SEARCH_LIMITED = [
+    5,
+    "ci:0",
+    ["title", "book 0"],
+    "ci:1",
+    ["title", "book 1"],
+]
+
+# Cells: redis-py 8.1.0, protocol=2 and protocol=3, decode_responses=True,
+# redis:8.4. SELECT price * 2 AS dbl FROM cnt_idx, which translates to
+# FT.AGGREGATE ... APPLY with no GROUPBY. RESP2 sends the placeholder 1 that
+# the Redis docs disclaim as "not a valid value"; RESP3 sends the real count.
+# See TestAggregateCountDivergesByProtocol.
+RESP2_AGGREGATE_COMPUTED = [
+    1,
+    ["price", "10", "dbl", "20"],
+    ["price", "11", "dbl", "22"],
+]
+
+RESP3_AGGREGATE_COMPUTED = {
+    "attributes": [],
+    "format": "STRING",
+    "results": [
+        {"extra_attributes": {"price": "10", "dbl": "20"}, "values": []},
+        {"extra_attributes": {"price": "11", "dbl": "22"}, "values": []},
+    ],
+    "total_results": 2,
+    "warning": [],
+}
+
 # Cell: redis-py 8.1.0, protocol=2, decode_responses=True, redis:8.4
 # SELECT score() AS relevance FROM verify_products WHERE fulltext(title, 'laptop')
-# The one array branch no other test covers, and the only guard on the parser
-# having been moved into _parse_array_reply unchanged.
+# The one array branch no other test covers.
 RESP2_SEARCH_SCORE_ONLY = [
     2,
     "vp:1",
@@ -203,6 +250,24 @@ def _search_score_only() -> TranslatedQuery:
         query_string="@title:laptop",
         args=["RETURN", "0", "WITHSCORES", "SCORER", "BM25", "DIALECT", "2"],
         score_alias="relevance",
+    )
+
+
+def _search_limited() -> TranslatedQuery:
+    return TranslatedQuery(
+        command="FT.SEARCH",
+        index="cnt_idx",
+        query_string="*",
+        args=["RETURN", "1", "title", "LIMIT", "0", "2", "DIALECT", "2"],
+    )
+
+
+def _aggregate_computed() -> TranslatedQuery:
+    return TranslatedQuery(
+        command="FT.AGGREGATE",
+        index="cnt_idx",
+        query_string="*",
+        args=["APPLY", "@price * 2", "AS", "dbl", "DIALECT", "2"],
     )
 
 
@@ -259,18 +324,54 @@ class TestSearchResp3Map:
             {b"price": b"39", b"title": b"sql cookbook"},
         ]
 
-    async def test_bookkeeping_keys_do_not_leak_into_rows(self, execute_reply):
-        """``id``, ``values`` and ``extra_attributes`` are not columns."""
+    async def test_only_document_fields_become_columns(self, execute_reply):
+        """A new RESP3 result key must not become a column.
+
+        Asserted as an allowlist rather than a denylist of known bookkeeping
+        keys, so a key RediSearch adds later fails here instead of silently
+        appearing in every row.
+        """
         result = await execute_reply(_search(), RESP3_SEARCH)
 
         for row in result.rows:
-            assert not {"id", "values", "extra_attributes", "payload"} & set(row)
+            assert set(row) == {"price", "title"}
+
+    async def test_count_is_the_total_not_the_row_count(self, execute_reply):
+        """``count`` comes from ``total_results``, which LIMIT does not reduce.
+
+        Callers paginate on this (docs/concepts/result-shape.md), so deriving
+        it from the number of returned results would be silently wrong.
+        """
+        result = await execute_reply(_search_limited(), RESP3_SEARCH_LIMITED)
+
+        assert result.count == 5
+        assert len(result.rows) == 2
 
     async def test_missing_extra_attributes_yields_empty_row(self, execute_reply):
         result = await execute_reply(_search(), RESP3_SEARCH_MISSING_FIELDS)
 
         assert result.count == 2
         assert result.rows == [{"price": "32", "title": "redis in action"}, {}]
+
+    async def test_flat_field_array_is_tolerated(self, execute_reply):
+        """Defensive: a result whose fields arrive already flat still parses.
+
+        No redis-py version sends this for FT.SEARCH, but ``_parse_hybrid_reply``
+        accepts both forms for the same conceptual field, and a total
+        ``_field_array`` is what keeps an unexpected shape from silently
+        becoming an empty row. Derived from RESP3_SEARCH.
+        """
+        reply = {
+            "attributes": [],
+            "format": "STRING",
+            "results": [{"id": "vp:5", "extra_attributes": ["title", "flat"]}],
+            "total_results": 1,
+            "warning": [],
+        }
+
+        result = await execute_reply(_search(), reply)
+
+        assert result.rows == [{"title": "flat"}]
 
     async def test_empty_results_yields_no_rows(self, execute_reply):
         result = await execute_reply(_search(), RESP3_SEARCH_EMPTY)
@@ -336,19 +437,57 @@ class TestAggregateResp3Map:
             {"category": "office", "cnt": "2", "total": "67", "avg_rating": "3.95"},
         ]
 
-    async def test_aggregate_count_comes_from_total_results(self, execute_reply):
-        """RESP3 ``total_results`` matches the RESP2 leading count.
+    async def test_missing_extra_attributes_yields_empty_row(self, execute_reply):
+        """The aggregate branch reaches the field flattener separately."""
+        reply = {
+            "attributes": [],
+            "format": "STRING",
+            "results": [{"extra_attributes": {"category": "books"}}, {"values": []}],
+            "total_results": 2,
+            "warning": [],
+        }
 
-        Measured against Redis 8.4.6: a GROUP BY returning N groups reports
-        ``total_results: N`` on RESP3 and ``N`` at position 0 on RESP2.
-        """
-        result = await execute_reply(_aggregate(), RESP3_AGGREGATE)
+        result = await execute_reply(_aggregate(), reply)
 
-        assert result.count == len(result.rows) == 2
+        assert result.rows == [{"category": "books"}, {}]
+
+
+class TestAggregateCountDivergesByProtocol:
+    """For FT.AGGREGATE, ``count`` is protocol-dependent, and that is accepted.
+
+    An aggregate pipeline with no GROUPBY (a computed field, a date function, a
+    geo_distance projection) leaves RESP2's leading integer as the placeholder
+    the Redis docs call "not a valid value", while RESP3's ``total_results``
+    reports the real figure. Measured on Redis 8.4.6: the same SQL over 5
+    documents gives count=1 on RESP2 and count=5 on RESP3.
+
+    Neither value can be turned into the other without changing the protocol=2
+    behaviour callers already depend on, so both are surfaced as Redis sent
+    them. This test exists to stop someone "fixing" the difference by deriving
+    count from len(rows), which would silently change RESP2 output.
+    """
+
+    async def test_resp2_reports_the_placeholder(self, execute_reply):
+        result = await execute_reply(_aggregate_computed(), RESP2_AGGREGATE_COMPUTED)
+
+        assert result.count == 1
+        assert len(result.rows) == 2
+
+    async def test_resp3_reports_the_real_total(self, execute_reply):
+        result = await execute_reply(_aggregate_computed(), RESP3_AGGREGATE_COMPUTED)
+
+        assert result.count == 2
+        assert len(result.rows) == 2
 
 
 class TestResp2ArrayUnchanged:
     """The array path still parses the shape it always did."""
+
+    async def test_count_is_the_total_not_the_row_count(self, execute_reply):
+        result = await execute_reply(_search_limited(), RESP2_SEARCH_LIMITED)
+
+        assert result.count == 5
+        assert len(result.rows) == 2
 
     async def test_withscores_return0_array_reply(self, execute_reply):
         result = await execute_reply(_search_score_only(), RESP2_SEARCH_SCORE_ONLY)
@@ -358,3 +497,70 @@ class TestResp2ArrayUnchanged:
             {"relevance": "0.714285696039395"},
             {"relevance": "0.714285696039395"},
         ]
+
+
+class TestUnrecognizedReplies:
+    """A reply that is neither shape is rejected, not parsed into empty rows.
+
+    A map that is not a result set (a cluster node-keyed reply, FT.PROFILE) or
+    an array that is not one (a WITHCURSOR pair) would otherwise fold to zero
+    rows and look like an empty result set. That silent-empty failure is the
+    one redis-py shipped in 8.0.0 (redis-py#4107).
+    """
+
+    async def test_map_without_results_raises(self, execute_reply):
+        node_keyed = {"127.0.0.1:6379": {"total_results": 2, "results": []}}
+
+        with pytest.raises(ValueError, match="without a 'results' key"):
+            await execute_reply(_search(), node_keyed)
+
+    async def test_profile_shaped_map_raises(self, execute_reply):
+        with pytest.raises(ValueError, match="without a 'results' key"):
+            await execute_reply(_search(), {"Results": {}, "Profile": {}})
+
+    async def test_non_array_non_map_reply_raises(self, execute_reply):
+        with pytest.raises(ValueError, match="Unrecognized FT.SEARCH reply"):
+            await execute_reply(_search(), "OK")
+
+    async def test_empty_results_list_is_not_rejected(self, execute_reply):
+        """An empty result set is legitimate and must still parse."""
+        result = await execute_reply(_search(), RESP3_SEARCH_EMPTY)
+
+        assert result.count == 0
+        assert result.rows == []
+
+
+class TestErrorRewrapping:
+    """Both executors re-wrap ResponseError with an actionable hint."""
+
+    async def test_ismissing_hint_is_added(self, execute_reply):
+        translated = TranslatedQuery(
+            command="FT.SEARCH",
+            index="verify_products",
+            query_string="ismissing(@email)",
+            args=["DIALECT", "2"],
+        )
+        error = redis.ResponseError("Unknown function")
+
+        with pytest.raises(redis.ResponseError, match="ismissing\\(\\) requires"):
+            await execute_reply(translated, error)
+
+    async def test_unrelated_response_error_propagates_unchanged(self, execute_reply):
+        """Only the two known-cause errors are re-wrapped."""
+        error = redis.ResponseError("no such index")
+
+        with pytest.raises(redis.ResponseError, match="^no such index$"):
+            await execute_reply(_search(), error)
+
+    async def test_hybrid_version_hint_is_added(self, execute_reply):
+        translated = TranslatedQuery(
+            command="FT.HYBRID",
+            index="verify_items",
+            query_string="",
+            args=["SEARCH", "@description:smartphone"],
+            is_hybrid=True,
+        )
+        error = redis.ResponseError("unknown command 'FT.HYBRID'")
+
+        with pytest.raises(redis.ResponseError, match="8.4"):
+            await execute_reply(translated, error)

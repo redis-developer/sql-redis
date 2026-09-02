@@ -4,14 +4,16 @@ Every `Executor.execute()` call returns a `QueryResult` with two attributes: `ro
 
 ## What `count` means
 
-The integer in `count` is the total Redis reported for the query: position 0 of a RESP2 array reply, or `total_results` in a RESP3 map reply. The two agree. Its meaning depends on which command ran (see [FT.SEARCH vs FT.AGGREGATE](search-vs-aggregate.md)):
+`count` is whatever Redis reported for the query: position 0 of a RESP2 array reply, or `total_results` in a RESP3 map reply. Its meaning depends on which command ran (see [FT.SEARCH vs FT.AGGREGATE](search-vs-aggregate.md)):
 
-- **`FT.SEARCH`** (no aggregation): `count` is the **total number of matching documents** in the index, regardless of `LIMIT`. So `count` can be much larger than `len(rows)`. This is useful for pagination.
-- **`FT.AGGREGATE`** (any aggregation, GROUP BY, computed field, date function): `count` is the **number of rows in the reply**, which is what you got back. After `LIMIT`, the two are equal.
+- **`FT.SEARCH`** (no aggregation): `count` is the **total number of matching documents**, regardless of `LIMIT`. So `count` can be much larger than `len(rows)`, which is what makes it useful for pagination. Both protocols report the same figure.
+- **`FT.AGGREGATE`** (any aggregation, GROUP BY, computed field, date function): `count` is **not the number of rows you got back**, and it is the one value that differs by protocol. With a `GROUP BY`, both protocols report the number of groups before `LIMIT`. Without one, a computed-field projection leaves RESP2 reporting `1` (a placeholder the [Redis docs](https://redis.io/docs/latest/commands/ft.aggregate/) call "not a valid value") while RESP3 reports the real figure. Use `len(rows)` if you want the rows you received.
+
+Neither aggregate value can be derived from the other without changing what `protocol=2` callers already get, so the library reports what Redis sent.
 
 ## What `rows` looks like
 
-A row is always a `dict`, but the *keys* and *values* depend on five orthogonal factors.
+A row is always a `dict`, but the *keys* and *values* depend on four orthogonal factors.
 
 ### Factor 1: client decoding
 
@@ -50,36 +52,30 @@ If your SELECT contains `score()`, the underlying `FT.SEARCH` runs with `WITHSCO
 
 ```python
 # SELECT title, score() AS relevance FROM products WHERE fulltext(...)
-{b"title": b"gaming laptop", b"relevance": "0.5"}
+{b"title": b"gaming laptop", b"relevance": b"0.5"}   # RESP2
+{b"title": b"gaming laptop", b"relevance": 0.5}      # RESP3
 ```
 
 The score column name is whatever alias you wrote (`score() AS relevance` produces `relevance`). If you used `score()` without `AS`, the library falls back to a stable internal name.
 
 The score's value type depends on the wire protocol: `str` (or `bytes`, depending on decoding) on RESP2, and `float` on RESP3, where Redis sends it as a double. `float()` is the protocol-safe conversion at the call site and works on both.
 
-### Factor 4: wire protocol
-
-Redis replies to `FT.SEARCH` and `FT.AGGREGATE` with a flat array on RESP2 and
-a map on RESP3, and `sql_redis` reads the raw reply, so the protocol your client
-negotiated decides which shape arrives. The library parses both, and the rows
-come out the same. Note that redis-py 8 defaults to RESP3, where earlier
-versions defaulted to RESP2, so this can change under you on an upgrade without
-you passing `protocol` at all.
-
-One value is visibly protocol-dependent: the score, described above. Redis sends
-it as text on RESP2 and as a double on RESP3, and the library passes it through
-rather than normalising it.
-
-### Factor 5: `RETURN 0`
+### Factor 4: `RETURN 0`
 
 If your SELECT is just `score()` with no document fields, the underlying command uses `RETURN 0` (no document fields returned). Each row contains only the score column:
 
 ```python
 # SELECT score() AS s FROM products WHERE fulltext(title, 'laptop')
-{b"s": "0.5"}
+{b"s": b"0.5"}
 ```
 
 This is mostly useful when you want a relevance-only ranking without paying to ship the document body back.
+
+## A note on the wire protocol
+
+Redis replies to `FT.SEARCH` and `FT.AGGREGATE` with a flat array on RESP2 and a map on RESP3, and `sql_redis` reads the raw reply, so the protocol your client negotiated decides which shape arrives. The library parses both and the rows come out the same, but two values differ: the score's type (Factor 3) and the aggregate `count` described above.
+
+Worth knowing because redis-py 8 defaults to RESP3 where earlier versions defaulted to RESP2, so an upgrade can change both without you passing `protocol` at all.
 
 ## Score-column collision avoidance
 
@@ -94,7 +90,7 @@ You will not normally see this; it is a defensive measure for the unusual case.
 
 It would be tempting to normalise everything: always strings, always `float` scores, always uniform shape. The library does not, for three reasons.
 
-1. **Bytes is the right default for Redis.** Some fields legitimately contain binary data. Force-decoding to UTF-8 would corrupt those. The same argument covers the RESP3 score: stringifying a double cannot reproduce the text Redis would have sent on RESP2 (`repr(1.0)` is `"1.0"`, Redis writes `"1"`), so normalising would invent a third form rather than deliver parity.
+1. **Bytes is the right default for Redis.** Some fields legitimately contain binary data. Force-decoding to UTF-8 would corrupt those. The same argument covers the RESP3 score: stringifying a double cannot reproduce the text Redis would have sent on RESP2, so normalising would invent a third form rather than deliver parity.
 2. **The shape difference between `FT.SEARCH` and `FT.AGGREGATE` is intrinsic to the Redis commands.** Hiding it would lie about what is happening.
 3. **One-call-site logic is cheap; library-wide policy is expensive.** A user who wants a uniform shape can write a 5-line decoder once, customised to their data. The library shipping that decoder for everyone is the wrong place for the policy.
 

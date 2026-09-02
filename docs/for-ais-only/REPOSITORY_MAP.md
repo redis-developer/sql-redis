@@ -69,7 +69,7 @@ tests/
 | `IS NULL`, `IS NOT NULL`, `exists()` | `parser.py`, `query_builder.py` |
 | Parameter substitution | `executor.py::_substitute_params` |
 | FT.SEARCH vs FT.AGGREGATE branching | `translator.py::translate_parsed` (the `use_aggregate` boolean) |
-| Result-row parsing | `executor.py::_ScoreParseMixin` (`_parse_reply` dispatches by reply shape; `_parse_array_reply` holds the four branches: WITHSCORES + RETURN 0, WITHSCORES, plain SEARCH, AGGREGATE; `_resp3_to_resp2` folds a RESP3 map into the array shape) |
+| Result-row parsing | `executor.py::_parse_reply` (dispatches by reply shape), `_parse_array_reply` (the four branches: WITHSCORES + RETURN 0, WITHSCORES, plain SEARCH, AGGREGATE), `_fold_map_to_array` (folds a RESP3 map into the array shape) |
 
 ## What to read before changing X
 
@@ -79,9 +79,10 @@ tests/
 - **Analyzer/query-builder changes.** Read `analyzer.py` and the matching
   branch in `query_builder.py`. The two are tightly coupled: a new field type
   in the analyzer needs a corresponding emitter in the builder.
-- **Executor changes.** The sync and async executors share `_ScoreParseMixin`
-  and the result-parsing branches. If you change the response shape, both
-  need updates.
+- **Executor changes.** The sync and async executors share the module-level
+  reply parsers, so a parsing change lands once. Their `execute()` bodies are
+  still near-identical above the `_parse_reply` call, so a change there needs
+  applying twice.
 - **Schema registry changes.** The two registry classes do not share code,
   but they share semantics. Lazy loading, invalidation, and load coalescing
   must be consistent across sync and async.

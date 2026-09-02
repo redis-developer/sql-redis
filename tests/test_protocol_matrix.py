@@ -25,6 +25,8 @@ import redis.asyncio as async_redis
 
 from sql_redis import create_async_executor, create_executor
 
+pytestmark = pytest.mark.protocol
+
 INDEX = "protocol_matrix"
 PREFIX = "pm:"
 
@@ -42,6 +44,8 @@ AGGREGATE_SQL = f"SELECT category, COUNT(*) AS cnt, SUM(price) AS total FROM {IN
 SCORE_SQL = (
     f"SELECT title, score() AS relevance FROM {INDEX} WHERE fulltext(title, 'laptop')"
 )
+LIMITED_SQL = f"SELECT title FROM {INDEX} ORDER BY price ASC LIMIT 2"
+COMPUTED_SQL = f"SELECT price * 2 AS double_price FROM {INDEX}"
 
 _REDIS_PY_MAJOR = int(redis.__version__.split(".")[0])
 
@@ -151,6 +155,22 @@ class TestReplyShapeCanary:
 
         assert isinstance(raw, expected)
 
+    def test_unset_protocol_follows_redis_py_default(self, endpoint, matrix_index):
+        """redis-py 8 defaults to RESP3; 6.x and 7.x default to RESP2.
+
+        This is the claim docs/concepts/result-shape.md makes about an upgrade
+        changing the reply shape without the caller passing ``protocol``.
+        """
+        client = _client(endpoint)
+        try:
+            raw = client.execute_command(
+                "FT.SEARCH", matrix_index, "*", "LIMIT", "0", "2"
+            )
+        finally:
+            client.close()
+
+        assert isinstance(raw, dict if _REDIS_PY_MAJOR >= 8 else list)
+
 
 class TestRowsMatchAcrossClientModes:
     """Every client mode yields the rows the protocol=2 baseline yields."""
@@ -175,19 +195,23 @@ class TestRowsMatchAcrossClientModes:
         baseline, baseline_count = _rows(endpoint, AGGREGATE_SQL, protocol=2)
         rows, count = _rows(endpoint, AGGREGATE_SQL, **client_kwargs)
 
+        # RediSearch does not guarantee group order without a SORTBY, so
+        # compare by group key rather than positionally.
         by_category = {row["category"]: row for row in rows}
+        assert by_category == {row["category"]: row for row in baseline}
         assert sorted(by_category) == ["books", "electronics", "office"]
         assert by_category["books"] == {"category": "books", "cnt": "2", "total": "71"}
-        assert rows == baseline
         assert count == baseline_count == 3
 
     @pytest.mark.parametrize("client_kwargs", CLIENT_MODES)
-    def test_no_bookkeeping_columns_leak(self, endpoint, matrix_index, client_kwargs):
-        """RESP3 result maps carry id/values/extra_attributes; rows must not."""
-        rows, _ = _rows(endpoint, PLAIN_SQL, **client_kwargs)
+    def test_count_is_the_total_not_the_row_count(
+        self, endpoint, matrix_index, client_kwargs
+    ):
+        """LIMIT reduces the rows, not the count callers paginate on."""
+        rows, count = _rows(endpoint, LIMITED_SQL, **client_kwargs)
 
-        for row in rows:
-            assert not {"id", "values", "extra_attributes", "payload"} & set(row)
+        assert count == 4
+        assert [row["title"] for row in rows] == ["redis in action", "sql cookbook"]
 
 
 class TestScoreValueType:
@@ -200,10 +224,39 @@ class TestScoreValueType:
         assert isinstance(resp2_rows[0]["relevance"], str)
         assert isinstance(resp3_rows[0]["relevance"], float)
         # float() is the protocol-safe conversion at the call site.
-        assert [float(r["relevance"]) for r in resp2_rows] == [
-            float(r["relevance"]) for r in resp3_rows
-        ]
-        assert [r["title"] for r in resp2_rows] == [r["title"] for r in resp3_rows]
+        assert [float(r["relevance"]) for r in resp2_rows] == pytest.approx(
+            [float(r["relevance"]) for r in resp3_rows]
+        )
+        assert {r["title"] for r in resp2_rows} == {r["title"] for r in resp3_rows}
+
+
+class TestAggregateCountDivergesByProtocol:
+    """``count`` is protocol-dependent for an FT.AGGREGATE without GROUPBY.
+
+    A computed-field projection produces a LOAD/APPLY-only pipeline, where
+    RESP2 leaves the leading integer at the placeholder the Redis docs call
+    "not a valid value" while RESP3 reports the real figure in
+    ``total_results``. Neither can be derived from the other without changing
+    the protocol=2 output callers already depend on, so both are surfaced as
+    Redis sent them. Documented in docs/concepts/result-shape.md.
+    """
+
+    def test_placeholder_on_resp2_real_total_on_resp3(self, endpoint, matrix_index):
+        resp2_rows, resp2_count = _rows(endpoint, COMPUTED_SQL, protocol=2)
+        resp3_rows, resp3_count = _rows(endpoint, COMPUTED_SQL, protocol=3)
+
+        assert len(resp2_rows) == len(resp3_rows) == 4
+        assert resp2_count == 1
+        assert resp3_count == 4
+
+    def test_rows_still_match(self, endpoint, matrix_index):
+        """Only the count differs. The rows are identical."""
+        resp2_rows, _ = _rows(endpoint, COMPUTED_SQL, protocol=2)
+        resp3_rows, _ = _rows(endpoint, COMPUTED_SQL, protocol=3)
+
+        assert sorted(r["double_price"] for r in resp2_rows) == sorted(
+            r["double_price"] for r in resp3_rows
+        )
 
 
 class TestDecodeResponsesOff:

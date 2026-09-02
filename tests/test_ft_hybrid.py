@@ -48,6 +48,8 @@ from sql_redis.parser import SQLParser
 from sql_redis.schema import SchemaRegistry
 from sql_redis.translator import Translator
 
+pytestmark = pytest.mark.protocol
+
 
 def float_vector_to_bytes(vector: list[float]) -> bytes:
     """Convert a list of floats to binary format for Redis vector storage."""

@@ -88,13 +88,11 @@ jobs:
           sys.exit(0 if redis.__version__ == '${{ matrix.redis-py }}' else 1)"
 
       # Reply shapes depend on the redis-py version and the negotiated RESP
-      # protocol, so these files are run against each supported redis-py.
+      # protocol, so the protocol-marked tests run against each supported
+      # redis-py. Selecting by marker rather than by filename means a new
+      # protocol-sensitive test is picked up here without editing this job.
       # 'uv run --with' layers an ephemeral overlay and never writes uv.lock.
       - name: Run reply-shape and protocol tests
         run: >
-          uv run --with 'redis==${{ matrix.redis-py }}' python -m pytest
-          tests/test_reply_shapes.py
-          tests/test_protocol_matrix.py
-          tests/test_nil_field_array.py
-          tests/test_ft_hybrid.py
-          -q
+          uv run --with 'redis==${{ matrix.redis-py }}'
+          python -m pytest -m protocol -q

@@ -22,8 +22,8 @@ the base client. `Search.search()` calls `execute_command` and then its own
 array on RESP2, a map on RESP3.
 
 `_parse_reply` therefore dispatches on the shape of the reply
-(`isinstance(raw_result, dict)`), and `_resp3_to_resp2` folds a map back into
-the array shape so one parser handles both. Do not "simplify" this into a
+(`isinstance(raw_result, dict)`), and `_fold_map_to_array` folds a map back
+into the array shape so one parser handles both. Do not "simplify" this into a
 single unconditional path, and do not replace the shape check with a protocol
 check on the connection: sniffing `connection_kwargs["protocol"]` is wrong for
 cluster and sentinel clients, and it cannot distinguish redis-py 8's four

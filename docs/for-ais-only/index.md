@@ -26,7 +26,7 @@ Use this to find the right starting point fast.
 | Change schema loading semantics | [Schema-aware translation](../concepts/schema-aware-translation.md), then `schema.py` |
 | Change async behavior | [Async invariants](../concepts/async-invariants.md), then `executor.py::AsyncExecutor` and `schema.py::AsyncSchemaRegistry` |
 | Change the FT.SEARCH/FT.AGGREGATE branching | [FT.SEARCH vs FT.AGGREGATE](../concepts/search-vs-aggregate.md), then `translator.py::translate_parsed` |
-| Change the result-row shape | [Result shape](../concepts/result-shape.md), then `executor.py` (`Executor.execute` parsing branches) |
+| Change the result-row shape | [Result shape](../concepts/result-shape.md), then `executor.py::_parse_reply` and the functions below it |
 | Run tests | [Build and test](BUILD_AND_TEST.md) |
 | Diagnose "this looks broken" | [Failure modes](FAILURE_MODES.md) before assuming a bug |
 

@@ -14,7 +14,11 @@ deterministically without a live Redis server. The ``stub_executor`` /
 equivalents of these cases are in ``test_reply_shapes.py``.
 """
 
+import pytest
+
 from sql_redis.translator import TranslatedQuery
+
+pytestmark = pytest.mark.protocol
 
 
 class TestStandardSearchNilFields:
