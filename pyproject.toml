@@ -82,6 +82,9 @@ exclude = '''
 [tool.pytest.ini_options]
 log_cli = true
 asyncio_mode = "auto"
+markers = [
+    "protocol: reply shapes depend on the RESP protocol and the redis-py version (run by the redis-py-compat CI job)",
+]
 
 [tool.mypy]
 warn_unused_configs = true

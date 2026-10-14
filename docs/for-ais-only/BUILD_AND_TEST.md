@@ -62,7 +62,11 @@ uv run --group docs mkdocs build --strict
 
 ## CI gates (target state)
 
-- `make check` (lint + tests) on every PR.
+- `make check` (lint + tests) on every PR, across Python 3.9 to 3.13.
+- `pytest -m protocol` against redis-py 6.3.0, 7.4.0 and 8.1.0 (the
+  `redis-py-compat` job). Mark any test whose result depends on the RESP
+  protocol or the redis-py version with `@pytest.mark.protocol` so it runs
+  there.
 - `make docs-build` with `-W` on every PR.
 - 100% coverage gate.
 
@@ -76,7 +80,18 @@ uv run pytest tests/test_parser.py tests/test_translator.py -x -vv
 
 These do not need Redis and run in well under a second.
 
-When changing executor logic:
+When changing reply parsing:
+
+```
+uv run pytest tests/test_reply_shapes.py tests/test_nil_field_array.py -x -vv
+```
+
+These feed canned replies through the parser with no server, so they are the
+fastest signal on a parsing change. Follow with
+`tests/test_protocol_matrix.py`, which asserts the same behaviour against a
+real server on both protocols.
+
+When changing other executor logic:
 
 ```
 uv run pytest tests/test_executor.py tests/test_sql_queries.py -x -vv

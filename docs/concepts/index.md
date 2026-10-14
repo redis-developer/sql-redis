@@ -60,7 +60,7 @@ Foundational reading for sql-redis. Each page explains a single design choice or
 
     ---
 
-    What `QueryResult.rows` actually contains, why it varies with the command, scoring, and client decoding.
+    What `QueryResult.rows` actually contains, why it varies with the command, scoring, client decoding and the wire protocol.
 
 -   :material-test-tube:{ .lg .middle } **[Testing philosophy](testing-philosophy.md)**
 

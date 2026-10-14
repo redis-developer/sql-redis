@@ -7,6 +7,8 @@ import redis
 
 from sql_redis.schema import SchemaRegistry, _parse_schema_from_info
 
+pytestmark = pytest.mark.protocol
+
 
 def _create_test_indexes(redis_client: redis.Redis) -> list[str]:
     """Helper to create test indexes."""

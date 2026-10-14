@@ -20,7 +20,7 @@ def _extract_attributes(info: Any) -> list:
     """Pull the ``attributes`` section out of an FT.INFO reply.
 
     Handles both reply shapes: the RESP2 flat list
-    (``[..., 'attributes', [...], ...]``) and the redis-py 8.x / RESP3 map
+    (``[..., 'attributes', [...], ...]``) and the RESP3 map
     (``{b'attributes': [...], ...}``), whose keys may be bytes or str.
     """
     if isinstance(info, dict):
@@ -66,7 +66,7 @@ def _parse_schema_from_info(info: Any) -> dict[str, str]:
 
     This is a pure function with no I/O operations, shared by both the sync
     and async schema registries. It accepts both the RESP2 list reply and the
-    redis-py 8.x / RESP3 map reply (see ``_extract_attributes``).
+    RESP3 map reply (see ``_extract_attributes``).
 
     Args:
         info: The raw response from the FT.INFO command (list or dict).
