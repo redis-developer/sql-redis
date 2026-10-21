@@ -9,12 +9,13 @@ from sql_redis.executor import (
     create_executor,
 )
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
-from sql_redis.translator import TranslatedQuery, Translator
+from sql_redis.translator import HybridPolicy, TranslatedQuery, Translator
 from sql_redis.version import __version__
 
 __all__ = [
     "Translator",
     "TranslatedQuery",
+    "HybridPolicy",
     "SchemaRegistry",
     "AsyncSchemaRegistry",
     "Executor",

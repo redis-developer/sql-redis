@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import redis
 
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
-from sql_redis.translator import Translator
+from sql_redis.translator import HybridPolicy, Translator, _validate_hybrid_policy
 
 if TYPE_CHECKING:
     import redis.asyncio as async_redis
@@ -209,11 +209,27 @@ class _ScoreParseMixin:
 class Executor(_ScoreParseMixin):
     """Executes SQL queries against Redis."""
 
-    def __init__(self, client: redis.Redis, schema_registry: SchemaRegistry) -> None:
-        """Initialize executor with Redis client and schema registry."""
+    def __init__(
+        self,
+        client: redis.Redis,
+        schema_registry: SchemaRegistry,
+        *,
+        hybrid_policy: str | None = None,
+    ) -> None:
+        """Initialize executor with Redis client and schema registry.
+
+        Args:
+            client: A synchronous Redis client.
+            schema_registry: A SchemaRegistry instance.
+            hybrid_policy: Optional filtered-vector policy, ``"ADHOC_BF"``
+                or ``"BATCHES"``. See :class:`Translator` for command mapping.
+        """
         self._client = client
         self._schema_registry = schema_registry
-        self._translator = Translator(schema_registry)
+        self._translator = Translator(
+            schema_registry,
+            hybrid_policy=hybrid_policy,
+        )
 
     def execute(self, sql: str, *, params: dict | None = None) -> QueryResult:
         """Execute a SQL query and return results."""
@@ -348,16 +364,23 @@ class AsyncExecutor(_ScoreParseMixin):
         self,
         client: "async_redis.Redis",
         schema_registry: AsyncSchemaRegistry,
+        *,
+        hybrid_policy: str | None = None,
     ) -> None:
         """Initialize async executor with Redis client and schema registry.
 
         Args:
             client: An async Redis client (redis.asyncio.Redis).
             schema_registry: An AsyncSchemaRegistry instance.
+            hybrid_policy: Optional filtered-vector policy, ``"ADHOC_BF"``
+                or ``"BATCHES"``. See :class:`Translator` for command mapping.
         """
         self._client = client
         self._schema_registry = schema_registry
-        self._translator = Translator(schema_registry)
+        self._translator = Translator(
+            schema_registry,
+            hybrid_policy=hybrid_policy,
+        )
 
     async def execute(self, sql: str, *, params: dict | None = None) -> QueryResult:
         """Execute a SQL query asynchronously and return results."""
@@ -486,6 +509,7 @@ def create_executor(
     *,
     schema_registry: SchemaRegistry | None = None,
     schema_cache_strategy: SchemaCacheStrategy = "lazy",
+    hybrid_policy: str | None = None,
 ) -> Executor:
     """Create a sync SQL executor with the requested schema cache strategy.
 
@@ -495,14 +519,25 @@ def create_executor(
         schema_cache_strategy: Schema loading strategy. ``"lazy"`` defers
             ``FT.INFO`` calls until a referenced index is needed. ``"load_all"``
             preserves the historical eager behavior by preloading all schemas.
+        hybrid_policy: Optional filtered-vector execution policy, ``"BATCHES"``
+            or ``"ADHOC_BF"``. Applies to FT.SEARCH and FT.HYBRID; the latter
+            emits ``POLICY ADHOC`` for ``"ADHOC_BF"``. Unfiltered queries and
+            queries with no explicit policy are unchanged.
     """
     schema_cache_strategy = _validate_schema_cache_strategy(schema_cache_strategy)
+    validated_hybrid_policy: HybridPolicy | None = _validate_hybrid_policy(
+        hybrid_policy
+    )
 
     registry = schema_registry or SchemaRegistry(client)
     if schema_cache_strategy == "load_all":
         registry.load_all()
 
-    return Executor(client, registry)
+    return Executor(
+        client,
+        registry,
+        hybrid_policy=validated_hybrid_policy,
+    )
 
 
 async def create_async_executor(
@@ -510,6 +545,7 @@ async def create_async_executor(
     *,
     schema_registry: AsyncSchemaRegistry | None = None,
     schema_cache_strategy: SchemaCacheStrategy = "lazy",
+    hybrid_policy: str | None = None,
 ) -> AsyncExecutor:
     """Create an async SQL executor with the requested schema cache strategy.
 
@@ -519,11 +555,22 @@ async def create_async_executor(
         schema_cache_strategy: Schema loading strategy. ``"lazy"`` defers
             ``FT.INFO`` calls until a referenced index is needed. ``"load_all"``
             preserves the historical eager behavior by preloading all schemas.
+        hybrid_policy: Optional filtered-vector execution policy, ``"BATCHES"``
+            or ``"ADHOC_BF"``. Applies to FT.SEARCH and FT.HYBRID; the latter
+            emits ``POLICY ADHOC`` for ``"ADHOC_BF"``. Unfiltered queries and
+            queries with no explicit policy are unchanged.
     """
     schema_cache_strategy = _validate_schema_cache_strategy(schema_cache_strategy)
+    validated_hybrid_policy: HybridPolicy | None = _validate_hybrid_policy(
+        hybrid_policy
+    )
 
     registry = schema_registry or AsyncSchemaRegistry(client)
     if schema_cache_strategy == "load_all":
         await registry.load_all()
 
-    return AsyncExecutor(client, registry)
+    return AsyncExecutor(
+        client,
+        registry,
+        hybrid_policy=validated_hybrid_policy,
+    )
