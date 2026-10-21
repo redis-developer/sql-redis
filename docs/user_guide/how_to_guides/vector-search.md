@@ -54,6 +54,29 @@ result = executor.execute(
 
 The filter narrows the candidate set; the KNN runs over what survives.
 
+## Explicit filter execution policy
+
+Some Redis deployments require an explicit policy when vector queries have a
+pre-filter. Set `hybrid_policy` when creating the executor:
+
+```python
+from sql_redis import create_executor
+
+executor = create_executor(client, hybrid_policy="ADHOC_BF")
+```
+
+The same option is accepted by `create_async_executor`, `Executor`,
+`AsyncExecutor`, and `Translator`. Values are case-insensitive; choose
+`"ADHOC_BF"` or `"BATCHES"`. Invalid values raise `ValueError`.
+
+- Filtered `FT.SEARCH` KNN queries emit `HYBRID_POLICY ADHOC_BF` or
+  `HYBRID_POLICY BATCHES`.
+- Filtered `FT.HYBRID` queries emit `FILTER ... POLICY ADHOC` or
+  `FILTER ... POLICY BATCHES`. The public `ADHOC_BF` value maps to `ADHOC`
+  in this command's syntax.
+- With the default `None`, or when the query has no pre-filter, translation
+  is unchanged.
+
 ## Hybrid fusion (FT.HYBRID)
 
 `hybrid_vector_search()` fuses a full-text query and a vector query into a single

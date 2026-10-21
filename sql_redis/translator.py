@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import dataclass, field
+from typing import Literal, cast
 
 from sql_redis.analyzer import AnalyzedQuery, Analyzer
 from sql_redis.parser import (
@@ -19,6 +20,18 @@ from sql_redis.parser import (
 )
 from sql_redis.query_builder import QueryBuilder
 from sql_redis.schema import AsyncSchemaRegistry, SchemaRegistry
+
+HybridPolicy = Literal["BATCHES", "ADHOC_BF"]
+
+
+def _validate_hybrid_policy(hybrid_policy: str | None) -> HybridPolicy | None:
+    """Validate the optional vector pre-filter execution policy."""
+    if hybrid_policy is None:
+        return None
+    normalized = hybrid_policy.upper()
+    if normalized not in {"BATCHES", "ADHOC_BF"}:
+        raise ValueError("hybrid_policy must be one of: 'BATCHES', 'ADHOC_BF'")
+    return cast(HybridPolicy, normalized)
 
 
 def _fmt_num(value: float) -> str:
@@ -62,17 +75,28 @@ class TranslatedQuery:
 class Translator:
     """Translates SQL queries to Redis FT.SEARCH/FT.AGGREGATE commands."""
 
-    def __init__(self, schema_registry: SchemaRegistry | AsyncSchemaRegistry) -> None:
+    def __init__(
+        self,
+        schema_registry: SchemaRegistry | AsyncSchemaRegistry,
+        *,
+        hybrid_policy: str | None = None,
+    ) -> None:
         """Initialize translator with schema registry.
 
         Args:
             schema_registry: Registry containing index schemas. Can be either
                 sync (SchemaRegistry) or async (AsyncSchemaRegistry) - only
                 the sync get_schema() method is used.
+            hybrid_policy: Optional execution policy for filtered vector queries.
+                ``"BATCHES"`` or ``"ADHOC_BF"`` emits ``HYBRID_POLICY`` for
+                FT.SEARCH and ``FILTER ... POLICY`` for FT.HYBRID. FT.HYBRID
+                maps ``"ADHOC_BF"`` to ``"ADHOC"``. Queries without a
+                pre-filter are unchanged; None preserves the server default.
         """
         self._schema_registry = schema_registry
         self._parser = SQLParser()
         self._query_builder = QueryBuilder()
+        self._hybrid_policy = _validate_hybrid_policy(hybrid_policy)
 
     def parse(self, sql: str) -> ParsedQuery:
         """Parse a SQL SELECT into a ParsedQuery AST.
@@ -233,8 +257,13 @@ class Translator:
             vs = analyzed.vector_search
             # Vector search uses KNN syntax
             if analyzed.has_prefilter and combined:
-                # Prefilter: (filter)=>[KNN k @field $vec]
-                return f"({combined})=>[KNN {vs.k} @{vs.field} $vector AS {vs.alias}]"
+                # Prefilter: (filter)=>[KNN k @field $vec [HYBRID_POLICY p]]
+                policy = (
+                    f" HYBRID_POLICY {self._hybrid_policy}"
+                    if self._hybrid_policy is not None
+                    else ""
+                )
+                return f"({combined})=>[KNN {vs.k} @{vs.field} $vector{policy} AS {vs.alias}]"
             else:
                 # Pure KNN: *=>[KNN k @field $vec]
                 return f"*=>[KNN {vs.k} @{vs.field} $vector AS {vs.alias}]"
@@ -576,7 +605,16 @@ class Translator:
                 method_tokens.extend(["EF_RUNTIME", str(spec.ef_runtime)])
             args.extend(["KNN", str(len(method_tokens)), *method_tokens])
         if has_filter:
-            args.extend(["FILTER", "1", filter_expr])
+            filter_tokens = [filter_expr]
+            if self._hybrid_policy is not None:
+                # FT.HYBRID names the brute-force policy ADHOC, unlike FT.SEARCH.
+                policy = (
+                    "ADHOC"
+                    if self._hybrid_policy == "ADHOC_BF"
+                    else self._hybrid_policy
+                )
+                filter_tokens.extend(["POLICY", policy])
+            args.extend(["FILTER", str(len(filter_tokens)), *filter_tokens])
 
         # COMBINE: RRF (default) or LINEAR. The combined score is yielded under
         # the SELECT alias so it comes back as a column.
